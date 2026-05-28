@@ -1,0 +1,2995 @@
+openapi: 3.0.3
+info:
+  title: Clockin Mobile API
+  description: Reconstructed from openapi-typescript-codegen client embedded in the Clockin Capacitor app source maps.
+  version: '2'
+servers:
+- url: https://mobile.clockin.de/v2
+  description: Production
+- url: https://mobile.clockin.test/v2
+  description: Test (from extracted source)
+paths:
+  /absences:
+    get:
+      summary: Get all absences that belong to the employee of the authenticated user
+      operationId: getAbsences
+      tags:
+      - Absences
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AbsenceArray'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+    post:
+      summary: Store an absence.
+      operationId: storeAbsence
+      tags:
+      - Absences
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Absence'
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /absences/{absenceId}:
+    delete:
+      summary: Deletes an absence.
+      operationId: deleteAbsence
+      tags:
+      - Absences
+      parameters:
+      - name: absenceId
+        in: path
+        required: true
+        schema:
+          type: number
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+    patch:
+      summary: Updates an absence.
+      operationId: updateAbsence
+      tags:
+      - Absences
+      parameters:
+      - name: absenceId
+        in: path
+        required: true
+        schema:
+          type: number
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Absence'
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /company-absence-types:
+    get:
+      summary: Get the ordered default absence types for the authenticated user
+      operationId: getCompanyAbsenceTypes
+      tags:
+      - Absences
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CompanyAbsenceTypeArray'
+        '401':
+          description: The request was unauthenticated
+  /possibleAbsenceSubstitutes/{start}/{end}:
+    get:
+      summary: Get the id and name of all possible Substitutes for a given time period
+      operationId: possibleAbsenceSubstitutes
+      tags:
+      - Absences
+      parameters:
+      - name: start
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: end
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SubstituteArray'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+  /ai/imageToText:
+    post:
+      summary: Extract the text content of an image.
+      operationId: imageToText
+      tags:
+      - Ai
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      text:
+                        type: string
+                    required:
+                    - text
+                required:
+                - data
+        '400':
+          description: The feature is disabled for this company.
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /ai/start-realtime:
+    post:
+      summary: Starts interactive Realtime session, returns ephermal token.
+      operationId: startRealtimeSession
+      tags:
+      - Ai
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                    required:
+                    - key
+                required:
+                - data
+        '400':
+          description: The feature is disabled for this company.
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /ai/logs:
+    post:
+      summary: Store AI usage logs of Realtime interaction with conversation data and token counts.
+      operationId: storeAiLogs
+      tags:
+      - Ai
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiLogRequest'
+      responses:
+        '200':
+          description: any OK
+        '400':
+          description: The feature is disabled for this company.
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /ai/translate:
+    post:
+      summary: Translate text using AI translation service.
+      operationId: translateText
+      tags:
+      - Ai
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TranslateRequest'
+      responses:
+        '200':
+          description: TranslateResponse Translation successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslateResponse'
+        '400':
+          description: The feature is disabled for this company.
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /ai/summarize:
+    post:
+      summary: Summarize text using AI summarization service.
+      operationId: summarizeText
+      tags:
+      - Ai
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SummarizeRequest'
+      responses:
+        '200':
+          description: SummarizeResponse Summarization successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SummarizeResponse'
+        '400':
+          description: The feature is disabled for this company.
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /ai/generateSummary:
+    post:
+      summary: Generate a concise summary from text using AI.
+      operationId: generateSummary
+      tags:
+      - Ai
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateSummaryRequest'
+      responses:
+        '200':
+          description: GenerateSummaryResponse Summary generation successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateSummaryResponse'
+        '400':
+          description: The feature is disabled for this company.
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /ai/generateTitle:
+    post:
+      summary: Generate a concise title from text using AI.
+      operationId: generateTitle
+      tags:
+      - Ai
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateTitleRequest'
+      responses:
+        '200':
+          description: GenerateTitleResponse Title generation successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateTitleResponse'
+        '400':
+          description: The feature is disabled for this company.
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /ai/extractTasks:
+    post:
+      summary: Extract actionable tasks from transcribed speech or text.
+      operationId: extractTasks
+      tags:
+      - Ai
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskExtractionRequest'
+      responses:
+        '200':
+          description: TaskExtractionResponse Task extraction successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskExtractionResponse'
+        '400':
+          description: The feature is disabled for this company.
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /ai/transcribe:
+    post:
+      summary: Transcribe audio to text with segment-level timestamps.
+      operationId: transcribeAudio
+      tags:
+      - Ai
+      responses:
+        '200':
+          description: TranscribeResponse Transcription successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranscribeResponse'
+        '400':
+          description: The feature is disabled for this company.
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /app-onboarding-tours:
+    get:
+      summary: Get all app onboarding tour progresses for the authenticated employee
+      operationId: getAppOnboardingTourProgresses
+      tags:
+      - AppOnboardingTours
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AppOnboardingTourProgressArray'
+        '401':
+          description: The request was unauthenticated
+  /app-onboarding-tours/{identifier}:
+    post:
+      summary: "Record completion or skip of an app onboarding tour Idempotent upsert for a single tour. `completed` is a\
+        \ terminal state \u2014 once a tour is marked as completed it cannot be downgraded to `skipped`."
+      operationId: storeAppOnboardingTourProgress
+      tags:
+      - AppOnboardingTours
+      parameters:
+      - name: identifier
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Unique string key identifying the tour (e.g. `time_tracking`, `absences`)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreAppOnboardingTourProgressRequest'
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AppOnboardingTourProgress'
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /auth/code/login:
+    post:
+      summary: Authenticate as device or employee with a code
+      operationId: loginViaCode
+      tags:
+      - Authentication
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Code'
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      auth_token:
+                        $ref: '#/components/schemas/AuthToken'
+                      auth_type:
+                        type: string
+                      device_token:
+                        $ref: '#/components/schemas/DeviceAuthToken'
+                      user_token:
+                        $ref: '#/components/schemas/UserAuthToken'
+                      type:
+                        $ref: '#/components/schemas/DeviceType'
+                    required:
+                    - device_token
+                    - type
+        '401':
+          description: The request was unauthenticated
+        '410':
+          description: Code expired
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /auth/user/login:
+    post:
+      summary: Authenticate with email and password to get an auth token
+      operationId: loginUser
+      tags:
+      - Authentication
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      auth_token:
+                        $ref: '#/components/schemas/AuthToken'
+                      user_token:
+                        $ref: '#/components/schemas/UserAuthToken'
+                      device_token:
+                        $ref: '#/components/schemas/DeviceAuthToken'
+                      type:
+                        $ref: '#/components/schemas/DeviceType'
+                    required:
+                    - user_token
+                    - device_token
+                    - type
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /auth/user/loginWithPin:
+    post:
+      summary: Authenticate as employee on multiuserdevice for self service area
+      operationId: loginUserWithPin
+      tags:
+      - Authentication
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeCredentials'
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      auth_token:
+                        $ref: '#/components/schemas/AuthToken'
+                      user_token:
+                        $ref: '#/components/schemas/UserAuthToken'
+                    required:
+                    - user_token
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /auth/user/officeSessionUrl:
+    get:
+      summary: Get a signed url for sso
+      operationId: generateOfficeSessionUrl
+      tags:
+      - Authentication
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SignedUrl'
+        '401':
+          description: The request was unauthenticated
+  /auth/device/officeSessionUrl:
+    get:
+      summary: Get a signed url for sso
+      operationId: generateOfficeSessionUrlForDevice
+      tags:
+      - Authentication
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SignedUrl'
+        '401':
+          description: The request was unauthenticated
+  /auth/user/authorizeQrLogin:
+    post:
+      summary: Authorize a QR login token scanned from web frontend Allows an authenticated mobile app user to authorize a
+        QR login token displayed on the web frontend. The token is short-lived (5 minutes) and can only be used once. After
+        authorization, the web frontend user will be logged in as this user.
+      operationId: authorizeQrLogin
+      tags:
+      - Authentication
+      responses:
+        '200':
+          description: any Token successfully authorized
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+        '401':
+          description: The request was unauthenticated
+        '404':
+          description: Token not found
+        '409':
+          description: Token already authorized
+        '410':
+          description: Token expired
+        '422':
+          description: Request validation failed
+  /auth/user/logout:
+    post:
+      summary: Logout. Invalidate token of an authenticated user.
+      operationId: logoutUser
+      tags:
+      - Authentication
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+  /auth/user/resetPassword:
+    post:
+      summary: Reset password.
+      operationId: resetPassword
+      tags:
+      - Authentication
+      responses:
+        '200':
+          description: any OK
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /auth/device/logout:
+    post:
+      summary: Logout. Invalidate token of an authenticated device.
+      operationId: logoutDevice
+      tags:
+      - Authentication
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+  /correction:
+    get:
+      summary: Get workdays with events of the employee that is associated with the authenticated user
+      operationId: getWorkdaysForCorrection
+      tags:
+      - Correction
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WorkdayArray'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+  /correction/updateEvent/{eventId}:
+    patch:
+      summary: Update an event
+      operationId: updateEvent
+      tags:
+      - Correction
+      parameters:
+      - name: eventId
+        in: path
+        required: true
+        schema:
+          type: number
+        description: event id of the event to update
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrectionEvent'
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      transactionId:
+                        type: number
+                      firstInstanceToRefresh:
+                        type: string
+                      lastInstanceToRefresh:
+                        type: string
+                    required:
+                    - transactionId
+                    - firstInstanceToRefresh
+                    - lastInstanceToRefresh
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /correction/storeEvent:
+    post:
+      summary: Store an event
+      operationId: storeEvent
+      tags:
+      - Correction
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrectionEvent'
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      transactionId:
+                        type: number
+                      event_uuid:
+                        type: string
+                    required:
+                    - transactionId
+                    - event_uuid
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /correction/deleteEvent/{eventId}:
+    delete:
+      summary: Delete an event
+      operationId: deleteEvent
+      tags:
+      - Correction
+      parameters:
+      - name: eventId
+        in: path
+        required: true
+        schema:
+          type: number
+        description: event id of the event to delete
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      transactionId:
+                        type: number
+                    required:
+                    - transactionId
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /correction/undo/{transactionId}:
+    patch:
+      summary: Undo a correction by transactionId
+      operationId: undoTransaction
+      tags:
+      - Correction
+      parameters:
+      - name: transactionId
+        in: path
+        required: true
+        schema:
+          type: number
+        description: transaction id of the transaction to be undone
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /admin/dashboard/employees/managed:
+    get:
+      summary: Get all clocked-in employees (including absent) for the admin dashboard
+      operationId: getAdminDashboardManagedEmployees
+      tags:
+      - Dashboard
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      employees:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DashboardLiveEmployee'
+                      tasks:
+                        type: array
+                        items:
+                          type: string
+        '401':
+          description: The request was unauthenticated
+  /admin/dashboard/employees:
+    post:
+      summary: Create a new employee in the authenticated user's company
+      operationId: createManagedEmployee
+      tags:
+      - Dashboard
+      responses:
+        '200':
+          description: any Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: number
+                      first_name:
+                        type: string
+                      last_name:
+                        type: string
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /admin/dashboard/todos:
+    get:
+      summary: Get unchecked todos for the authenticated user
+      operationId: getAdminDashboardTodos
+      tags:
+      - Dashboard
+      parameters:
+      - name: perPage
+        in: query
+        required: true
+        schema:
+          description: 'unparsed: number = 5'
+      - name: page
+        in: query
+        required: true
+        schema:
+          description: 'unparsed: number = 1'
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      todos:
+                        description: "unparsed: LengthAwarePaginatorMeta & {\n        data?: Array<DashboardTodo>\n      }"
+        '401':
+          description: The request was unauthenticated
+    post:
+      summary: Create a new todo
+      operationId: createAdminDashboardTodo
+      tags:
+      - Dashboard
+      responses:
+        '200':
+          description: any Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {}
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /admin/dashboard/todos/{toDo}:
+    patch:
+      summary: Mark a todo as checked
+      operationId: checkAdminDashboardTodo
+      tags:
+      - Dashboard
+      parameters:
+      - name: toDo
+        in: path
+        required: true
+        schema:
+          type: number
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {}
+        '401':
+          description: The request was unauthenticated
+    put:
+      summary: Update a Todo
+      operationId: updateAdminDashboardTodo
+      tags:
+      - Dashboard
+      parameters:
+      - name: toDo
+        in: path
+        required: true
+        schema:
+          type: number
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {}
+        '401':
+          description: The request was unauthenticated
+  /admin/dashboard/projects/live:
+    get:
+      summary: Get currently active projects (employees clocked into a project)
+      operationId: getAdminDashboardLiveProjects
+      tags:
+      - Dashboard
+      parameters:
+      - name: search
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter by project name.
+      - name: perPage
+        in: query
+        required: true
+        schema:
+          description: 'unparsed: number = 5'
+      - name: page
+        in: query
+        required: true
+        schema:
+          description: 'unparsed: number = 1'
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      projects:
+                        description: "unparsed: LengthAwarePaginatorMeta & {\n        data?: Array<DashboardLiveProject>\n\
+                          \      }"
+        '401':
+          description: The request was unauthenticated
+  /admin/dashboard/news:
+    get:
+      summary: Get news feed for the admin dashboard
+      operationId: getAdminDashboardNews
+      tags:
+      - Dashboard
+      parameters:
+      - name: search
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter news by search term.
+      - name: typesFilter
+        in: query
+        required: false
+        schema:
+          type: string
+        description: JSON-encoded array of news type strings (e.g. '["event","projectfile"]').
+      - name: perPage
+        in: query
+        required: true
+        schema:
+          description: 'unparsed: number = 5'
+      - name: page
+        in: query
+        required: true
+        schema:
+          description: 'unparsed: number = 1'
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      news:
+                        description: "unparsed: LengthAwarePaginatorMeta & {\n        data?: Array<DashboardNewsItem>\n  \
+                          \    }"
+        '401':
+          description: The request was unauthenticated
+  /admin/dashboard/absences:
+    get:
+      summary: Get granted absences for today (or a given date)
+      operationId: getAdminDashboardAbsences
+      tags:
+      - Dashboard
+      parameters:
+      - name: date
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter absences by this date (ISO 8601). Defaults to today.
+      - name: search
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter by employee name.
+      - name: typesFilter
+        in: query
+        required: false
+        schema:
+          type: string
+        description: JSON-encoded array of AbsenceType integer values.
+      - name: perPage
+        in: query
+        required: true
+        schema:
+          description: 'unparsed: number = 5'
+      - name: page
+        in: query
+        required: true
+        schema:
+          description: 'unparsed: number = 1'
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      absences:
+                        description: "unparsed: LengthAwarePaginatorMeta & {\n        data?: Array<DashboardAbsence>\n   \
+                          \   }"
+                      types:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DashboardAbsenceTypeFilter'
+                      can_see_details:
+                        type: boolean
+        '401':
+          description: The request was unauthenticated
+  /admin/dashboard/absence-requests:
+    get:
+      summary: Get pending absence requests for managed employees
+      operationId: getAdminDashboardAbsenceRequests
+      tags:
+      - Dashboard
+      parameters:
+      - name: search
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter by employee name.
+      - name: typesFilter
+        in: query
+        required: false
+        schema:
+          type: string
+        description: JSON-encoded array of AbsenceType integer values.
+      - name: perPage
+        in: query
+        required: true
+        schema:
+          description: 'unparsed: number = 5'
+      - name: page
+        in: query
+        required: true
+        schema:
+          description: 'unparsed: number = 1'
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      absence_requests:
+                        description: "unparsed: LengthAwarePaginatorMeta & {\n        data?: Array<DashboardAbsenceRequest>\n\
+                          \      }"
+                      total_absence_request_count:
+                        type: number
+                      types:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DashboardAbsenceTypeFilter'
+                      can_see_details:
+                        type: boolean
+        '401':
+          description: The request was unauthenticated
+    patch:
+      summary: Update an absence request for a managed employee
+      operationId: updateAdminDashboardAbsenceRequest
+      tags:
+      - Dashboard
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /admin/dashboard/employees/{employee}:
+    get:
+      summary: Get personal and timesheet details for a managed employee
+      operationId: getManagedEmployeeDetails
+      tags:
+      - Dashboard
+      parameters:
+      - name: employee
+        in: path
+        required: true
+        schema:
+          type: number
+        description: The ID of the employee. Must be a managed employee of the authenticated user.
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ManagedEmployeeDetails'
+        '401':
+          description: The request was unauthenticated
+  /admin/dashboard/employees/{employee}/invite-link:
+    post:
+      summary: Generate an app invite link for a managed employee Regenerates the employee's onboarding secret and returns
+        a link pointing to the link subdomain for app onboarding.
+      operationId: generateInviteLink
+      tags:
+      - Dashboard
+      parameters:
+      - name: employee
+        in: path
+        required: true
+        schema:
+          type: number
+        description: The ID of the employee. Must be a managed employee of the authenticated user.
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      invite_link:
+                        type: string
+        '401':
+          description: The request was unauthenticated
+        '404':
+          description: The requested resource was not found
+  /debug/generateUploadUrl:
+    post:
+      summary: Generate a pre-signed S3 URL for debug file uploads
+      operationId: generateDebugUploadUrl
+      tags:
+      - Debug
+      responses:
+        '200':
+          description: any Pre-signed upload URL generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      upload_url:
+                        type: string
+                      content_type:
+                        type: string
+                    required:
+                    - upload_url
+                    - content_type
+                required:
+                - data
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /device/config:
+    get:
+      summary: Get the device configuration
+      operationId: getConfig
+      tags:
+      - Device
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Configuration'
+        '401':
+          description: The request was unauthenticated
+  /device/employees:
+    get:
+      summary: Get all Employees with projects and events which are related to requesting device
+      operationId: getEmployees
+      tags:
+      - Device
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/EmployeeArray'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+  /device/employee/{employeeId}:
+    get:
+      summary: Get a single Employee
+      operationId: getEmployee
+      tags:
+      - Device
+      parameters:
+      - name: employeeId
+        in: path
+        required: true
+        schema:
+          type: number
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Employee'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+  /device/changeEmployeePin:
+    post:
+      summary: Change PIN of single employee
+      operationId: changeEmployeePin
+      tags:
+      - Device
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PinChange'
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      hashed_pin:
+                        type: string
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+                nullable: true
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /device/pushToken:
+    post:
+      summary: Stores the push_token for the authenticated device
+      operationId: storePushToken
+      tags:
+      - Device
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /device/taskConfigs:
+    get:
+      summary: Get tasksConfigs for all employees
+      operationId: getTaskConfigs
+      tags:
+      - Device
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TaskConfigArray'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /device/upgrade/appv1/appv2:
+    post:
+      summary: Upgrade old app to new by exchanging legacy token for new and generating new Device and Config
+      operationId: upgradeAppV1AppV2
+      tags:
+      - Device
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user_token:
+                        $ref: '#/components/schemas/UserAuthToken'
+                      device_token:
+                        $ref: '#/components/schemas/DeviceToken'
+                      type:
+                        $ref: '#/components/schemas/DeviceType'
+                    required:
+                    - device_token
+                    - type
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /checklists:
+    get:
+      summary: Get all checklists
+      operationId: getChecklists
+      tags:
+      - Documentation
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ChecklistArray'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+    post:
+      summary: Store a checklist.
+      operationId: storeChecklist
+      tags:
+      - Documentation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChecklistResult'
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /confirmations:
+    post:
+      summary: Store a customer confirmation.
+      operationId: storeConfirmation
+      tags:
+      - Documentation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerConfirmation'
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /projectnotes:
+    post:
+      summary: Store a project note.
+      operationId: storeProjectNote
+      tags:
+      - Documentation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectNote'
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /project-recordings:
+    post:
+      summary: Store project recording metadata and get S3 upload URL.
+      operationId: storeProjectRecording
+      tags:
+      - Documentation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectRecordingRequest'
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ProjectRecordingResponse'
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /project-recordings/{projectRecordingId}/upload-completed:
+    post:
+      summary: Mark recording upload as completed and create Projectfile.
+      operationId: uploadCompleted
+      tags:
+      - Documentation
+      parameters:
+      - name: projectRecordingId
+        in: path
+        required: true
+        schema:
+          type: number
+        description: ID of the project recording
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+        '401':
+          description: The request was unauthenticated
+        '404':
+          description: Project recording not found or already completed
+        '409':
+          description: Upload already marked as completed
+  /events/storeMany:
+    post:
+      summary: Store a list of recorded events
+      operationId: storeEvents
+      tags:
+      - Events
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventArray'
+      responses:
+        '200':
+          description: any OK
+        '400':
+          description: Forbidden - employee lacks required permission
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /feature-wish:
+    post:
+      summary: Store a feature wish from users
+      operationId: storeFeatureWish
+      tags:
+      - FeatureWishes
+      responses:
+        '200':
+          description: any Feature wish stored successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+        '429':
+          description: Too many requests
+  /files:
+    post:
+      summary: Store a file.
+      operationId: storeFile
+      tags:
+      - Files
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      unassigned_uploaded_file_id:
+                        $ref: '#/components/schemas/UnassignedUploadedFile'
+                    required:
+                    - unassigned_uploaded_file_id
+                required:
+                - data
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /locations/storeMany:
+    post:
+      summary: Store a list of recorded locations
+      operationId: storeLocations
+      tags:
+      - Locations
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocationArray'
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /nfc-tags:
+    post:
+      summary: Store a new NFC tag
+      operationId: storeNfcTag
+      tags:
+      - Nfc
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NfcTagRequest'
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /admin/nfc-tags:
+    post:
+      summary: Store a new NFC tag from admin area
+      operationId: storeNfcTagForUser
+      tags:
+      - Nfc
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NfcTagRequest'
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /notes:
+    get:
+      summary: Get all notes of the past 7 days for all employees assigned to the device
+      operationId: getNotes
+      tags:
+      - Note
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/NoteArray'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+  /notes/{employee}/{day}:
+    get:
+      summary: Gets a specific note for an employee and a day
+      operationId: showNote
+      tags:
+      - Note
+      parameters:
+      - name: employee
+        in: path
+        required: true
+        schema:
+          type: number
+      - name: day
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Note'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+  /notes/store:
+    post:
+      summary: Store a daily Note
+      operationId: storeNote
+      tags:
+      - Note
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Note'
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '409':
+          description: The resource was modified and can only be updated by a newer version.
+        '422':
+          description: Request validation failed
+  /notifications/{id}/mark-as-read:
+    post:
+      summary: Mark a notification as read
+      operationId: markNotificationAsRead
+      tags:
+      - Notifications
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ID of the notification to mark as read
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+        '404':
+          description: The requested resource was not found
+  /projects:
+    get:
+      summary: Get a list of all projects
+      operationId: getProjects
+      tags:
+      - Projects
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ProjectArray'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+  /projects/{projectId}:
+    get:
+      summary: Get a specific Project by ID
+      operationId: getProject
+      tags:
+      - Projects
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: number
+        description: Id of the project to be completed
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Project'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+  /projects/complete/{projectId}:
+    post:
+      summary: Completes a project
+      operationId: completeProject
+      tags:
+      - Projects
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: number
+        description: Id of the project to be completed
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /projectDates/complete/{projectDateId}:
+    post:
+      summary: Completes a projectDate
+      operationId: completeProjectDate
+      tags:
+      - Projects
+      parameters:
+      - name: projectDateId
+        in: path
+        required: true
+        schema:
+          type: number
+        description: Id of the projectDate to be completed
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /projects/search:
+    post:
+      summary: Search for projects
+      operationId: searchProjects
+      tags:
+      - Projects
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ProjectArray'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /shift-plan/next:
+    get:
+      summary: Get the next upcoming shift for the authenticated user
+      operationId: getUpcomingShift
+      tags:
+      - ShiftPlan
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      description: 'unparsed: ShiftForApp | any'
+                required:
+                - data
+        '401':
+          description: The request was unauthenticated
+  /shift-plan/all:
+    get:
+      summary: Get all upcoming shifts for the authenticated user
+      operationId: getUpcomingShifts
+      tags:
+      - ShiftPlan
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      description: 'unparsed: Array<ShiftForApp> | any'
+                required:
+                - data
+        '401':
+          description: The request was unauthenticated
+  /shift-plan/free:
+    get:
+      summary: Get all free (unassigned) shifts the authenticated user can apply for
+      operationId: getFreeShifts
+      tags:
+      - ShiftPlan
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      description: 'unparsed: Array<ShiftForApp> | any'
+                required:
+                - data
+        '401':
+          description: The request was unauthenticated
+  /shift-plan/create-wish:
+    post:
+      summary: Create a wish (apply or withdraw) for a shift
+      operationId: createShiftEmployeeWish
+      tags:
+      - ShiftPlan
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ShiftForApp'
+                required:
+                - data
+        '401':
+          description: The request was unauthenticated
+        '403':
+          description: "Forbidden \u2013 user is not part of the shift plan or plan/revision is not active"
+        '422':
+          description: Request validation failed
+  /shift-plan/delete-wish/{wish}:
+    delete:
+      summary: Delete a pending wish (undo application or withdrawal request)
+      operationId: deleteShiftEmployeeWish
+      tags:
+      - ShiftPlan
+      parameters:
+      - name: wish
+        in: path
+        required: true
+        schema:
+          type: number
+        description: ID of the wish to delete
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ShiftForApp'
+                required:
+                - data
+        '401':
+          description: The request was unauthenticated
+        '403':
+          description: "Forbidden \u2013 wish does not belong to the user or is not pending"
+  /survey:
+    get:
+      summary: Get the ongoing survey if it exists
+      operationId: getSurvey
+      tags:
+      - Survey
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SurveyArray'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+  /survey/answer:
+    post:
+      summary: Store the survey Response
+      operationId: postSurveyAnswer
+      tags:
+      - Survey
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SurveyAnswer'
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /survey/updateAppOmrPopupStatus:
+    post:
+      summary: Update OMR app review popup status
+      operationId: updateAppOmrPopupStatus
+      tags:
+      - Survey
+      responses:
+        '200':
+          description: any OK
+        '400':
+          description: Device is not of type personal
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Validation error
+  /timesheets/{start}/{end}:
+    get:
+      summary: Get all timesheets between start and end
+      operationId: getTimesheets
+      tags:
+      - Timesheets
+      parameters:
+      - name: start
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: end
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TimesheetArray'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+  /timesheet/download/{month}:
+    get:
+      summary: Downloads the timesheet for the given month
+      operationId: downloadTimesheet
+      tags:
+      - Timesheets
+      parameters:
+      - name: month
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: binary OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Blob'
+        '401':
+          description: The request was unauthenticated
+  /timesheets/totals:
+    get:
+      summary: Get total flextimeBalance and holidays
+      operationId: getTotals
+      tags:
+      - Timesheets
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TimesheetsTotals'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+  /tracking/myAreaOpened:
+    post:
+      summary: Track that the "My Area" section was opened
+      operationId: trackMyAreaOpened
+      tags:
+      - Tracking
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+  /travelLog/store:
+    post:
+      summary: Store a TravelLog
+      operationId: storeTravelLog
+      tags:
+      - TravelLog
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TravelLog'
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TravelLogResponse'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /travelLog/update:
+    post:
+      summary: Update a TravelLog
+      operationId: updateTravelLog
+      tags:
+      - TravelLog
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TravelLog'
+      responses:
+        '200':
+          description: any OK
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /travelLog/showMany:
+    post:
+      summary: Retrieves TravelLogs based on the given Event Ids
+      operationId: getTravelLogs
+      tags:
+      - TravelLog
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TravelLogResponseArray'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+        '422':
+          description: Request validation failed
+  /workdays:
+    get:
+      summary: Get workdays with events of the employee that is associated with the authenticated user
+      operationId: getWorkdays
+      tags:
+      - Workdays
+      parameters:
+      - name: employee_id
+        in: query
+        required: false
+        schema:
+          type: number
+        description: Get workdays for speciefic employee
+      responses:
+        '200':
+          description: any OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WorkdayArray'
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                  links:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          description: The request was unauthenticated
+components:
+  schemas:
+    AppOnboardingTourProgress:
+      type: object
+      properties:
+        tour_identifier:
+          type: string
+        status:
+          $ref: '#/components/schemas/AppOnboardingTourProgress'
+        completed_at:
+          type: string
+      required:
+      - tour_identifier
+      - status
+      nullable: true
+    CompanyRegistration:
+      type: object
+      properties:
+        email:
+          type: string
+        company_name:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        telephone:
+          description: 'unparsed: string/**'
+        tier:
+          $ref: '#/components/schemas/CompanyRegistration'
+        app_check_token:
+          type: string
+      required:
+      - email
+      - company_name
+      - first_name
+      - last_name
+      - tier
+      - app_check_token
+      nullable: true
+    CompanyRegistrationV2:
+      type: object
+      properties:
+        features:
+          type: object
+          properties:
+            normal_working_time:
+              type: boolean
+            project_time:
+              type: boolean
+          required:
+          - normal_working_time
+          - project_time
+        digitalization_options:
+          type: object
+          properties:
+            vacation:
+              type: boolean
+            absences:
+              type: boolean
+            employeefile:
+              type: boolean
+            company_analysis:
+              type: boolean
+            staff_planning:
+              type: boolean
+            datev:
+              type: boolean
+          required:
+          - vacation
+          - absences
+          - employeefile
+          - company_analysis
+          - staff_planning
+          - datev
+        documentation_features:
+          type: object
+          properties:
+            photos:
+              type: boolean
+            sketches:
+              type: boolean
+            notes:
+              type: boolean
+            checklists:
+              type: boolean
+            projectfile:
+              type: boolean
+          required:
+          - photos
+          - sketches
+          - notes
+          - checklists
+          - projectfile
+        selected_industry:
+          $ref: '#/components/schemas/CompanyRegistrationV2'
+        selected_company_size:
+          $ref: '#/components/schemas/CompanyRegistrationV2'
+        self_acclaimed_lead_source:
+          description: 'unparsed: CompanyRegistrationV2.self_acclaimed_lead_sourcecompany_name: string'
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          description: 'unparsed: stringemail: string'
+        app_check_token:
+          type: string
+      required:
+      - features
+      - digitalization_options
+      - documentation_features
+      - selected_industry
+      - selected_company_size
+      - first_name
+      - last_name
+      - app_check_token
+      nullable: true
+    Configuration:
+      type: object
+      properties:
+        subscription_active:
+          type: boolean
+        custom_design_enabled:
+          type: boolean
+        logo:
+          description: 'unparsed: stringcompany_name: string'
+        company_id:
+          type: number
+        device_id:
+          type: number
+        user_id:
+          description: 'unparsed: numbercustom_color: stringtracking_type?: TrackingType'
+        tracking_interval_seconds:
+          description: 'unparsed: numberdevice_name?: stringtype: DeviceType'
+        company_mode:
+          description: 'unparsed: Configuration.company_modeemployee_list_mode?: Configuration.employee_list_modepush_token_expired?:
+            boolean'
+        sites:
+          $ref: '#/components/schemas/SiteArray'
+        project_labels:
+          $ref: '#/components/schemas/ProjectLabelArray'
+        amplitude_api_key:
+          description: 'unparsed: stringki_features_enabled: boolean'
+        correction_reason_enabled:
+          type: boolean
+        travel_log_enabled:
+          type: boolean
+        daily_notes_enabled:
+          type: boolean
+        clocki_enabled:
+          type: boolean
+        ai_translations_enabled:
+          type: boolean
+        nfc_auth_enabled:
+          type: boolean
+        vacation_seconds_enabled:
+          type: boolean
+        ai_video_documentation:
+          type: boolean
+        ai_meeting_notes:
+          type: boolean
+        ai_meeting_notes_max_seconds:
+          description: 'unparsed: numberai_video_documentation_max_seconds: numberoffice_qr_login_enabled: boolean'
+        shift_plans_enabled:
+          type: boolean
+        shift_wishes_enabled:
+          type: boolean
+      required:
+      - custom_design_enabled
+      - logo
+      - company_id
+      - device_id
+      - user_id
+      - company_mode
+      - sites
+      - correction_reason_enabled
+      - travel_log_enabled
+      - daily_notes_enabled
+      - clocki_enabled
+      - ai_translations_enabled
+      - nfc_auth_enabled
+      - vacation_seconds_enabled
+      - ai_video_documentation
+      - ai_meeting_notes
+      - ai_meeting_notes_max_seconds
+      - shift_plans_enabled
+      - shift_wishes_enabled
+      nullable: true
+    DashboardAbsenceTypeFilter:
+      type: object
+      properties:
+        id:
+          type: number
+        name:
+          type: string
+        can_store_up_to_duration_precision:
+          $ref: '#/components/schemas/DashboardAbsenceTypeFilter'
+    DashboardLiveProject:
+      type: object
+      properties:
+        id:
+          type: number
+        parent_id:
+          description: 'unparsed: numbername?: string'
+        occured_at:
+          type: string
+        progress_percent:
+          description: "unparsed: numbericon?: {\n    icon?: string\n    type?: DashboardLiveProject.type\n  }"
+        employee_pictures:
+          description: "unparsed: Array<{\n    url?: stringinitials?: string\n    name?: string\n  }>"
+      nullable: true
+    DashboardNewsItem:
+      type: object
+      properties:
+        occured_at:
+          type: string
+        model_name:
+          description: 'unparsed: stringtitle?: string'
+        subtitle:
+          description: 'unparsed: stringtype?: DashboardNewsItem.type'
+      nullable: true
+    DeviceType:
+      description: could not parse DeviceType
+    Event:
+      type: object
+      properties:
+        id:
+          type: number
+        uuid:
+          description: 'unparsed: stringoccured_at: string'
+        employee_id:
+          type: number
+        task_id:
+          type: number
+        task_label:
+          description: 'unparsed: stringproject_id?: numberproject_date_id?: numberversion_id?: numberis_workplan_event?:
+            booleanis_deleted?: booleansite?: Sitetime_recording_action?: Event.time_recording_action'
+      required:
+      - employee_id
+      - task_id
+      nullable: true
+    ProjectRecordingRequest:
+      type: object
+      properties:
+        project_id:
+          description: 'unparsed: number/**'
+        employee_id:
+          type: number
+        transcript:
+          description: 'unparsed: string/**'
+        summary:
+          description: 'unparsed: string/**'
+        title:
+          description: 'unparsed: string/**'
+        content_type:
+          $ref: '#/components/schemas/ProjectRecordingRequest'
+        filename:
+          type: string
+        task_list:
+          type: array
+          items:
+            type: string
+      required:
+      - transcript
+      - content_type
+      - filename
+      nullable: true
+    ShiftForApp:
+      type: object
+      properties:
+        id:
+          type: number
+        startDate:
+          type: string
+        endDate:
+          type: string
+        durationInHours:
+          type: number
+        name:
+          description: 'unparsed: string/**'
+        color:
+          description: 'unparsed: string/**'
+        description:
+          description: 'unparsed: string/**'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShiftAttachment'
+        employees:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShiftEmployeeForApp'
+        maxEmployees:
+          type: number
+        changedFields:
+          type: array
+          items:
+            type: string
+        isNew:
+          type: boolean
+        placeId:
+          type: number
+        placeName:
+          type: string
+        revisionId:
+          type: number
+        planId:
+          type: number
+        planName:
+          description: 'unparsed: string/**'
+        planDescription:
+          description: 'unparsed: string/**'
+        planAttachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShiftAttachment'
+        isAssigned:
+          type: boolean
+        canApply:
+          type: boolean
+        canWithdraw:
+          type: boolean
+        wishId:
+          description: 'unparsed: number/**'
+        wishIntention:
+          description: 'unparsed: ShiftForApp.wishIntention/**'
+        wishStatus:
+          $ref: '#/components/schemas/ShiftForApp'
+      required:
+      - id
+      - startDate
+      - endDate
+      - durationInHours
+      - attachments
+      - employees
+      - maxEmployees
+      - changedFields
+      - isNew
+      - placeId
+      - placeName
+      - revisionId
+      - planId
+      - planAttachments
+      - isAssigned
+      - canApply
+      - canWithdraw
+      nullable: true
+    StoreAppOnboardingTourProgressRequest:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/StoreAppOnboardingTourProgressRequest'
+        app_version:
+          type: string
+      required:
+      - status
+      nullable: true
+    TrackingType:
+      description: could not parse TrackingType
+    TranscribeRequest:
+      type: object
+      properties:
+        file:
+          $ref: '#/components/schemas/Blob'
+        language:
+          description: 'unparsed: string/**'
+        triggered_by:
+          $ref: '#/components/schemas/TranscribeRequest'
+      required:
+      - file
+      nullable: true
+    TravelLog:
+      type: object
+      properties:
+        event_uuid:
+          description: 'unparsed: stringevent_id?: numberid?: number'
+        employee_id:
+          description: 'unparsed: numberdistance_in_km?: number'
+        net_expenses_in_cent:
+          type: number
+        tax_in_cent:
+          type: number
+        currency:
+          type: string
+        vehicle_type:
+          description: 'unparsed: TravelLog.vehicle_typecomment?: string'
+        km_reading_start:
+          type: number
+        km_reading_end:
+          type: number
+        license_plate:
+          type: string
+        unassigned_uploaded_file_ids:
+          $ref: '#/components/schemas/UnassignedUploadedFileIdArray'
+        assigned_file_ids:
+          type: array
+          items:
+            type: number
+      required:
+      - event_uuid
+      - employee_id
+      nullable: true
+    TravelLogResponse:
+      type: object
+      properties:
+        id:
+          type: number
+        event_id:
+          type: number
+        distance_in_km:
+          type: number
+        net_expenses_in_cent:
+          type: number
+        tax_in_cent:
+          type: number
+        currency:
+          type: string
+        vehicle_type:
+          description: 'unparsed: TravelLogResponse.vehicle_typecomment?: string'
+        km_reading_start:
+          type: number
+        km_reading_end:
+          type: number
+        license_plate:
+          type: string
+        files:
+          description: "unparsed: Array<{\n    id: number\n    web_path: string\n    mime_type?: string\n    name: string\n\
+            \  }>"
+      required:
+      - id
+      nullable: true
+    Absence:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    AbsenceArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    AiLogRequest:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    AppOnboardingTourProgressArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    AuthToken:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    Blob:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    ChecklistArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    ChecklistResult:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    Code:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    CompanyAbsenceTypeArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    CorrectionEvent:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    Credentials:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    CustomerConfirmation:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    DashboardLiveEmployee:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    DeviceAuthToken:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    DeviceToken:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    Employee:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    EmployeeArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    EmployeeCredentials:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    EventArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    GenerateSummaryRequest:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    GenerateSummaryResponse:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    GenerateTitleRequest:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    GenerateTitleResponse:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    LocationArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    ManagedEmployeeDetails:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    NfcTagRequest:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    Note:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    NoteArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    PinChange:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    Project:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    ProjectArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    ProjectNote:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    ProjectRecordingResponse:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    SignedUrl:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    SubstituteArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    SummarizeRequest:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    SummarizeResponse:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    SurveyAnswer:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    SurveyArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    TaskConfigArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    TaskExtractionRequest:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    TaskExtractionResponse:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    TimesheetArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    TimesheetsTotals:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    TranscribeResponse:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    TranslateRequest:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    TranslateResponse:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    TravelLogResponseArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    UnassignedUploadedFile:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    UserAuthToken:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
+    WorkdayArray:
+      type: object
+      description: 'TODO: model not extracted from source maps. Referenced by services but model file was not shipped.'
+      x-extracted: false
