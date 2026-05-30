@@ -4,6 +4,11 @@ import { useSearchParams } from "react-router"
 import { authClient } from "~/lib/auth-client"
 import { Button } from "~/components/ui/button"
 import { Card, CardContent, CardFooter } from "~/components/ui/card"
+import type { Route } from "./+types/consent"
+
+export function meta(_: Route.MetaArgs) {
+  return [{ title: "Authorize — clockin-mcp" }]
+}
 
 const SCOPE_LABELS: Record<string, string> = {
   openid: "Verify your identity",
