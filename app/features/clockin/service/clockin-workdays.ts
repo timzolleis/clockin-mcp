@@ -1,14 +1,13 @@
-import { HttpClientResponse } from "@effect/platform";
 import { Context, Effect, Layer } from "effect";
-import type { ClockinUnauthenticatedError } from "./clockin-api-errors";
-import { DeviceClockinClient, onlyClockinErrors } from "./clockin-client";
-import type { CurrentClockinCredentials } from "./clockin-client";
+import type { ClockinUnauthenticatedError } from "../client";
+import type { CurrentClockinCredentials } from "../client";
+import { ClockinProjectsApi, ClockinProjectsApiLive } from "../api";
+import { ClockinWorkdaysApi, ClockinWorkdaysApiLive } from "../api";
 import type { EventRead } from "~/lib/domain/event";
-import { ProjectArrayResponse, ProjectRef } from "~/lib/domain/project";
+import { ProjectRef } from "~/lib/domain/project";
 import {
   ProjectTotal,
   Workday,
-  WorkdayArrayResponse,
   WorkdaySegment,
   WorkdaySummary,
   WorkdayTotals
@@ -19,28 +18,15 @@ import { TaskId, stateOfTask } from "./clockin-tasks";
 // ---------------------------------------------------------------------------
 // Service interface (define the shape first; implement as a Layer later)
 // ---------------------------------------------------------------------------
+// Per-day, LLM-friendly rollups derived from the raw `/workdays` payload
+// (segments + totals per day). Raw transport lives in ClockinWorkdaysApi.
 
 export interface ClockinWorkdaysService {
   /**
-   * List the raw workdays (with nested events) for an employee.
+   * Per-day rollups (segments + totals) for an employee.
    *
-   * `GET /workdays?employee_id={id}` (device_token) → 401 bad or missing token.
-   * When `employeeId` is omitted the impl falls back to the `employee_id` in the
-   * current credentials. Transport/decode failures are defects, not part of this
-   * channel.
-   */
-  readonly list: (
-    employeeId?: EmployeeId
-  ) => Effect.Effect<ReadonlyArray<Workday>, ClockinUnauthenticatedError, CurrentClockinCredentials>;
-
-  /**
-   * Per-day, LLM-friendly rollups derived from the same `GET /workdays` payload
-   * (segments + totals per day).
-   *
-   * `GET /workdays?employee_id={id}` (device_token) → 401 bad or missing token.
-   * When `employeeId` is omitted the impl falls back to the `employee_id` in the
-   * current credentials. Transport/decode failures are defects, not part of this
-   * channel.
+   * → 401 bad or missing token. When `employeeId` is omitted the upstream falls
+   * back to the token's own employee. Transport/decode failures are defects.
    */
   readonly summaries: (
     employeeId?: EmployeeId
@@ -53,11 +39,8 @@ export class ClockinWorkdays extends Context.Tag("ClockinWorkdays")<
 >() { }
 
 // ---------------------------------------------------------------------------
-// Live implementation
+// Derivation helpers
 // ---------------------------------------------------------------------------
-// Both ops ride the DeviceClockinClient (device_token bearer). `summaries`
-// derives per-day rollups from the same `/workdays` payload, resolving project
-// names via a best-effort `/projects` fetch on the same client.
 
 const sortedEvents = (day: Workday): readonly EventRead[] =>
   [...(day.events ?? [])].sort((a, b) => a.occured_at.localeCompare(b.occured_at));
@@ -158,33 +141,24 @@ const buildSummary = (
   });
 };
 
+// ---------------------------------------------------------------------------
+// Live implementation
+// ---------------------------------------------------------------------------
+// Reads raw workdays + projects through the API layer, then derives per-day
+// rollups; project names resolve best-effort (a failed resolve degrades to a
+// `Project {id}` placeholder).
+
 export const ClockinWorkdaysLive = Layer.effect(
   ClockinWorkdays,
   Effect.gen(function* () {
-    const device = yield* DeviceClockinClient;
-
-    const readWorkdays = (employeeId?: EmployeeId) =>
-      device
-        .get(employeeId != null ? `/workdays?employee_id=${employeeId}` : "/workdays")
-        .pipe(
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(WorkdayArrayResponse)),
-          Effect.map((r) => r.data),
-          Effect.scoped,
-          onlyClockinErrors("ClockinUnauthenticatedError")
-        );
+    const workdaysApi = yield* ClockinWorkdaysApi;
+    const projectsApi = yield* ClockinProjectsApi;
 
     return ClockinWorkdays.of({
-      list: (employeeId) => readWorkdays(employeeId),
-
       summaries: (employeeId) =>
         Effect.gen(function* () {
-          const days = yield* readWorkdays(employeeId);
-          const allProjects = yield* device.get("/projects").pipe(
-            Effect.flatMap(HttpClientResponse.schemaBodyJson(ProjectArrayResponse)),
-            Effect.map((r) => r.data),
-            Effect.scoped,
-            Effect.catchAll(() => Effect.succeed([]))
-          );
+          const days = yield* workdaysApi.list(employeeId);
+          const allProjects = yield* projectsApi.list().pipe(Effect.catchAll(() => Effect.succeed([])));
           const projectNames = new Map(allProjects.map((p) => [p.id, p.name] as const));
           const projectName = (id: number) => projectNames.get(id) ?? `Project ${id}`;
           const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -192,4 +166,4 @@ export const ClockinWorkdaysLive = Layer.effect(
         })
     });
   })
-).pipe(Layer.provide([DeviceClockinClient.Default]));
+).pipe(Layer.provide([ClockinWorkdaysApiLive, ClockinProjectsApiLive]));

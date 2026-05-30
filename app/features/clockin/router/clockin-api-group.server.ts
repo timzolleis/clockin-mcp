@@ -3,17 +3,15 @@ import { Effect, Layer, Option, Redacted } from "effect"
 import { CredentialsRepository } from "~/features/clockin/credentials/credentials-repository"
 import { ClockinCredentialsService } from "~/features/clockin/credentials/credentials-service"
 import { RequestServicesLive } from "~/features/clockin/router/request-services.server"
+import { ClockinAuthApi, ClockinEmployeeApi, LoginInput } from "~/features/clockin/api"
+import { CurrentClockinCredentials } from "~/features/clockin/client"
 import {
-  ClockinAuth,
-  LoginInput,
-} from "~/features/clockin/service/clockin-auth"
-import { CurrentClockinCredentials } from "~/features/clockin/service/clockin-client"
-import { ClockinEmployee } from "~/features/clockin/service/clockin-employee"
-import { ClockinEvents } from "~/features/clockin/service/clockin-events"
-import { ClockinProjects } from "~/features/clockin/service/clockin-projects"
-import { ClockinStatus } from "~/features/clockin/service/clockin-status"
-import { ClockinTimesheets } from "~/features/clockin/service/clockin-timesheets"
-import { ClockinWorkdays } from "~/features/clockin/service/clockin-workdays"
+  ClockinEvents,
+  ClockinProjects,
+  ClockinStatus,
+  ClockinTimesheets,
+  ClockinWorkdays,
+} from "~/features/clockin/service"
 import { ClockinCredentials, UserId } from "~/lib/domain/credentials"
 import { EmployeeId } from "~/lib/domain/employee"
 import { ProjectDateId } from "~/lib/domain/project"
@@ -132,8 +130,8 @@ export const ClockinApiGroupLive = HttpApiBuilder.group(
             mapServerError(
               intoUpstreamError(
                 Effect.gen(function* () {
-                  const auth = yield* ClockinAuth
-                  const empSvc = yield* ClockinEmployee
+                  const auth = yield* ClockinAuthApi
+                  const empSvc = yield* ClockinEmployeeApi
                   const vault = yield* TokenVault
                   const credentials = yield* CredentialsRepository
                   const user = yield* AuthenticatedUser
@@ -291,7 +289,7 @@ export const ClockinApiGroupLive = HttpApiBuilder.group(
                 Effect.gen(function* () {
                   const events = yield* ClockinEvents
                   return yield* withTokens(
-                    events.startProject(
+                    events.switchToProject(
                       payload.projectId,
                       payload.projectDateId != null
                         ? ProjectDateId.make(payload.projectDateId)

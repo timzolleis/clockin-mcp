@@ -3,23 +3,23 @@ import { Context, Effect, Layer } from "effect";
 import type {
   ClockinUnauthenticatedError,
   ClockinValidationError
-} from "./clockin-api-errors";
-import type { CurrentClockinCredentials } from "./clockin-client";
-import { DeviceClockinClient, onlyClockinErrors } from "./clockin-client";
-import type { DeviceConfig, Employee } from "~/lib/domain/employee";
+} from "../client";
+import type { CurrentClockinCredentials } from "../client";
+import { DeviceClockinClient, onlyClockinErrors } from "../client";
+import type { DeviceConfig, Employee, EmployeeId } from "~/lib/domain/employee";
 import {
   DeviceConfigResponse,
   EmployeeArrayResponse,
   EmployeeResponse,
   TaskConfigsResponse
 } from "~/lib/domain/employee";
-import type { EmployeeId } from "~/lib/domain/employee";
 
 // ---------------------------------------------------------------------------
 // Service interface (define the shape first; implement as a Layer later)
 // ---------------------------------------------------------------------------
+// Pure transport over the upstream `/device` resource (device_token).
 
-export interface ClockinEmployeeService {
+export interface ClockinEmployeeApiService {
   /**
    * List the employees visible to this device. Used during setup to discover
    * the `employee_id` baked into event payloads.
@@ -69,9 +69,9 @@ export interface ClockinEmployeeService {
   >;
 }
 
-export class ClockinEmployee extends Context.Tag("ClockinEmployee")<
-  ClockinEmployee,
-  ClockinEmployeeService
+export class ClockinEmployeeApi extends Context.Tag("ClockinEmployeeApi")<
+  ClockinEmployeeApi,
+  ClockinEmployeeApiService
 >() { }
 
 // ---------------------------------------------------------------------------
@@ -79,15 +79,14 @@ export class ClockinEmployee extends Context.Tag("ClockinEmployee")<
 // ---------------------------------------------------------------------------
 // Every op is device-tier, riding the DeviceClockinClient (device_token) and
 // reading `CurrentClockinCredentials` per request. `onlyClockinErrors` keeps
-// each op's documented statuses and turns every other failure (undocumented
-// status, transport, decode) into a defect.
+// each op's documented statuses and turns every other failure into a defect.
 
-export const ClockinEmployeeLive = Layer.effect(
-  ClockinEmployee,
+export const ClockinEmployeeApiLive = Layer.effect(
+  ClockinEmployeeApi,
   Effect.gen(function* () {
     const device = yield* DeviceClockinClient;
 
-    return ClockinEmployee.of({
+    return ClockinEmployeeApi.of({
       employees: () =>
         device.get("/device/employees").pipe(
           Effect.flatMap(HttpClientResponse.schemaBodyJson(EmployeeArrayResponse)),

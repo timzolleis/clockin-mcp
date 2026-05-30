@@ -1,11 +1,11 @@
-import { HttpClientResponse } from "@effect/platform";
 import { Context, Effect, Layer } from "effect";
-import type { ClockinUnauthenticatedError } from "./clockin-api-errors";
-import type { CurrentClockinCredentials } from "./clockin-client";
-import { DeviceClockinClient, onlyClockinErrors } from "./clockin-client";
+import type { ClockinUnauthenticatedError } from "../client";
+import type { CurrentClockinCredentials } from "../client";
+import { ClockinProjectsApi, ClockinProjectsApiLive } from "../api";
+import { ClockinWorkdaysApi, ClockinWorkdaysApiLive } from "../api";
 import { CurrentStatus } from "~/lib/domain/status";
-import { ProjectArrayResponse, ProjectRef } from "~/lib/domain/project";
-import { WorkdayArrayResponse, type Workday } from "~/lib/domain/workday";
+import { ProjectRef } from "~/lib/domain/project";
+import type { Workday } from "~/lib/domain/workday";
 import type { EventRead } from "~/lib/domain/event";
 import type { WorkState } from "~/lib/domain/task";
 import { stateOfTask } from "./clockin-tasks";
@@ -17,12 +17,11 @@ import { stateOfTask } from "./clockin-tasks";
 export interface ClockinStatusService {
   /**
    * Derive the employee's current clock-in status. There is no upstream status
-   * endpoint: this reads `GET /workdays` (device_token), takes the latest event
-   * in the latest workday, and resolves `project_id` to a project name
-   * client-side.
+   * endpoint: this reads the raw workdays (via ClockinWorkdaysApi), takes the
+   * latest event in the latest workday, and resolves `project_id` to a project
+   * name client-side (via ClockinProjectsApi, best-effort).
    *
-   * `GET /workdays` → 401 bad or missing token. Transport/decode failures are
-   * defects, not part of this channel.
+   * → 401 bad or missing token. Transport/decode failures are defects.
    */
   readonly current: () => Effect.Effect<CurrentStatus, ClockinUnauthenticatedError, CurrentClockinCredentials>;
 }
@@ -33,12 +32,8 @@ export class ClockinStatus extends Context.Tag("ClockinStatus")<
 >() { }
 
 // ---------------------------------------------------------------------------
-// Live implementation
+// Derivation helpers
 // ---------------------------------------------------------------------------
-// `current` rides the DeviceClockinClient (device_token) to read `GET /workdays`,
-// then computes the status purely client-side. When the latest event is a
-// project event, the project name is resolved best-effort via `GET /projects`
-// (a failed resolve degrades to `null`, never to a status error).
 
 const latestEvent = (days: readonly Workday[]): EventRead | null => {
   let best: EventRead | null = null;
@@ -105,16 +100,22 @@ const describe = (
   }
 };
 
+// ---------------------------------------------------------------------------
+// Live implementation
+// ---------------------------------------------------------------------------
+// Reads raw workdays + projects through the API layer and computes the status
+// purely client-side. When the latest event is a project event, the project
+// name is resolved best-effort (a failed resolve degrades to `null`, never to a
+// status error).
+
 export const ClockinStatusLive = Layer.effect(
   ClockinStatus,
   Effect.gen(function* () {
-    const device = yield* DeviceClockinClient;
+    const workdaysApi = yield* ClockinWorkdaysApi;
+    const projectsApi = yield* ClockinProjectsApi;
 
     const resolveProject = (id: number) =>
-      device.get("/projects").pipe(
-        Effect.flatMap(HttpClientResponse.schemaBodyJson(ProjectArrayResponse)),
-        Effect.map((r) => r.data),
-        Effect.scoped,
+      projectsApi.list().pipe(
         Effect.map((all) => {
           const p = all.find((x) => x.id === id);
           return p ? new ProjectRef({ id: p.id, name: p.name }) : null;
@@ -124,11 +125,7 @@ export const ClockinStatusLive = Layer.effect(
 
     return ClockinStatus.of({
       current: () =>
-        device.get("/workdays").pipe(
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(WorkdayArrayResponse)),
-          Effect.map((r) => r.data),
-          Effect.scoped,
-          onlyClockinErrors("ClockinUnauthenticatedError"),
+        workdaysApi.list().pipe(
           Effect.flatMap((days) =>
             Effect.gen(function* () {
               const ev = latestEvent(days);
@@ -159,4 +156,4 @@ export const ClockinStatusLive = Layer.effect(
         )
     });
   })
-).pipe(Layer.provide([DeviceClockinClient.Default]));
+).pipe(Layer.provide([ClockinWorkdaysApiLive, ClockinProjectsApiLive]));

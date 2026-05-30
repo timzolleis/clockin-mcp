@@ -1,12 +1,12 @@
-import { HttpBody, HttpClientRequest, HttpClientResponse } from "@effect/platform";
+import { HttpBody, HttpClientResponse } from "@effect/platform";
 import { Context, Effect, Layer, Schema } from "effect";
 import type {
   ClockinRateLimitError,
   ClockinUnauthenticatedError,
   ClockinValidationError
-} from "./clockin-api-errors";
-import type { CurrentClockinCredentials } from "./clockin-client";
-import { ClockinHttpClient, UserClockinClient, onlyClockinErrors } from "./clockin-client";
+} from "../client";
+import type { CurrentClockinCredentials } from "../client";
+import { ClockinHttpClient, UserClockinClient, onlyClockinErrors } from "../client";
 
 // ---------------------------------------------------------------------------
 // Contract types
@@ -32,8 +32,10 @@ export class PersonalLogin extends Schema.Class<PersonalLogin>("PersonalLogin")(
 // ---------------------------------------------------------------------------
 // Service interface (define the shape first; implement as a Layer later)
 // ---------------------------------------------------------------------------
+// Pure transport over the upstream `/auth` resource. Login is unauthenticated
+// (base client); logout rides the user_token client.
 
-export interface ClockinAuthService {
+export interface ClockinAuthApiService {
   /**
    * Exchange email + password for the upstream tokens. Unauthenticated — runs
    * on the base client, so no `CurrentClockinCredentials` is required.
@@ -54,9 +56,9 @@ export interface ClockinAuthService {
   readonly logout: () => Effect.Effect<void, ClockinUnauthenticatedError, CurrentClockinCredentials>;
 }
 
-export class ClockinAuth extends Context.Tag("ClockinAuth")<
-  ClockinAuth,
-  ClockinAuthService
+export class ClockinAuthApi extends Context.Tag("ClockinAuthApi")<
+  ClockinAuthApi,
+  ClockinAuthApiService
 >() { }
 
 // ---------------------------------------------------------------------------
@@ -70,13 +72,13 @@ export class ClockinAuth extends Context.Tag("ClockinAuth")<
 /** `POST /auth/user/login` returns the tokens wrapped in the usual `{ data }` envelope. */
 const LoginResponse = Schema.Struct({ data: PersonalLogin });
 
-export const ClockinAuthLive = Layer.effect(
-  ClockinAuth,
+export const ClockinAuthApiLive = Layer.effect(
+  ClockinAuthApi,
   Effect.gen(function* () {
     const base = yield* ClockinHttpClient;
     const user = yield* UserClockinClient;
 
-    return ClockinAuth.of({
+    return ClockinAuthApi.of({
       login: (input) =>
         base.post("/auth/user/login", {
           body: HttpBody.unsafeJson({ email: input.email, password: input.password })

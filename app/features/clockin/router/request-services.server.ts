@@ -1,12 +1,17 @@
 import { Layer } from "effect"
 import { ClockinCredentialsServiceLive } from "~/features/clockin/credentials/credentials-service"
-import { ClockinAuthLive } from "~/features/clockin/service/clockin-auth"
-import { ClockinEmployeeLive } from "~/features/clockin/service/clockin-employee"
-import { ClockinEventsLive } from "~/features/clockin/service/clockin-events"
-import { ClockinProjectsLive } from "~/features/clockin/service/clockin-projects"
-import { ClockinStatusLive } from "~/features/clockin/service/clockin-status"
-import { ClockinTimesheetsLive } from "~/features/clockin/service/clockin-timesheets"
-import { ClockinWorkdaysLive } from "~/features/clockin/service/clockin-workdays"
+import {
+  ClockinAuthApiLive,
+  ClockinCorrectionsApiLive,
+  ClockinEmployeeApiLive,
+} from "~/features/clockin/api"
+import {
+  ClockinEventsLive,
+  ClockinProjectsLive,
+  ClockinStatusLive,
+  ClockinTimesheetsLive,
+  ClockinWorkdaysLive,
+} from "~/features/clockin/service"
 import { DatabaseLive } from "~/lib/effect/db"
 
 // Every service a v1 handler touches: the upstream Clockin clients (each Live
@@ -18,8 +23,11 @@ import { DatabaseLive } from "~/lib/effect/db"
 // repository, vault, Clockin config) resolves off it, so consumers just
 // `provideMerge(DatabaseLive)` + provide the `CloudflareEnv` tag.
 export const ServicesLive = Layer.mergeAll(
-  ClockinAuthLive,
-  ClockinEmployeeLive,
+  // Pure API services with no business wrapper (auth, employee, corrections).
+  ClockinAuthApiLive,
+  ClockinEmployeeApiLive,
+  ClockinCorrectionsApiLive,
+  // Business services — each bundles its own *Api dependencies via Layer.provide.
   ClockinEventsLive,
   ClockinProjectsLive,
   ClockinStatusLive,
