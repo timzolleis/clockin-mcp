@@ -1,11 +1,13 @@
-import { mcpHandler } from "@better-auth/oauth-provider"
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server"
 import { McpServer as OriginalMcpServer } from "@modelcontextprotocol/sdk/server/mcp"
 import type { JWTPayload } from "better-auth"
+import { verifyJwsAccessToken } from "better-auth/oauth2"
 import { Cause, Context, Effect, Layer, ManagedRuntime } from "effect"
 import { createMcpHandler } from "mcp-handler"
 import type { AppLoadContext } from "react-router"
 import { z } from "zod"
+import { AuthService } from "~/lib/auth"
+import { provideAuth } from "~/lib/auth-effect.server"
 import { ClockinCredentialsService } from "~/features/clockin/credentials/credentials-service"
 import { ServicesLive } from "~/features/clockin/router/request-services.server"
 import { CurrentClockinCredentials } from "~/features/clockin/client"
@@ -453,27 +455,70 @@ export const getMcpHandler = (
   const mcpResource = `${baseUrl}/mcp`
   const authIssuer = `${baseUrl}/api/auth`
 
-  const handler = mcpHandler(
-    {
-      jwksUrl: `${authIssuer}/jwks`,
-      verifyOptions: { issuer: authIssuer, audience: mcpResource },
-    },
-    (req, jwt) =>
-      createMcpHandler(
-        (server) =>
-          // Registration is a synchronous effect: it only reads the two
-          // request-scoped tags and wires callbacks (which bridge to the
-          // runtime lazily, per invocation).
-          Effect.runSync(
-            registerTools(runtime).pipe(
-              Effect.provideService(McpServer, server),
-              Effect.provideService(McpJwt, jwt),
-            ),
+  // Read the signing keys IN-PROCESS straight from D1 (via the jwt plugin),
+  // never over HTTP. A Worker subrequest to its own public hostname — which is
+  // what fetching `${authIssuer}/jwks` would be — fails at the edge and surfaces
+  // as `Jwks failed: <none>`, so token verification could never succeed in prod.
+  const jwks = () =>
+    Effect.runPromise(
+      provideAuth(env)(
+        Effect.flatMap(AuthService, (auth) =>
+          Effect.promise(() => auth.api.getJwks()),
+        ),
+      ),
+    )
+
+  // 401 challenge pointing MCP clients at our protected-resource metadata so
+  // they can discover the OAuth server and (re)authenticate. Mirrors the header
+  // `@better-auth/oauth-provider`'s `mcpHandler` produced.
+  const resourceUrl = new URL(mcpResource)
+  const challenge =
+    `Bearer resource_metadata="${resourceUrl.origin}` +
+    `/.well-known/oauth-protected-resource${resourceUrl.pathname}"`
+  const unauthorized = (message: string) =>
+    new Response(message, {
+      status: 401,
+      headers: { "WWW-Authenticate": challenge },
+    })
+
+  // Verify the bearer token locally against those keys, then hand off to the
+  // MCP transport. The inner registration is a synchronous effect: it only
+  // reads the two request-scoped tags and wires callbacks (which bridge to the
+  // runtime lazily, per invocation).
+  const dispatch = (req: Request, jwt: JWTPayload) =>
+    createMcpHandler(
+      (server) =>
+        Effect.runSync(
+          registerTools(runtime).pipe(
+            Effect.provideService(McpServer, server),
+            Effect.provideService(McpJwt, jwt),
           ),
-        { serverInfo: { name: "clockin-mcp", version: "0.1.0" } },
-        { basePath: "/", verboseLogs: baseUrl.includes("localhost") },
-      )(req),
-  )
+        ),
+      { serverInfo: { name: "clockin-mcp", version: "0.1.0" } },
+      { basePath: "/", verboseLogs: baseUrl.includes("localhost") },
+    )(req)
+
+  const handler = async (request: Request): Promise<Response> => {
+    const authorization = request.headers.get("authorization") ?? undefined
+    const token = authorization?.startsWith("Bearer ")
+      ? authorization.slice("Bearer ".length)
+      : authorization
+    if (!token) return unauthorized("missing authorization header")
+
+    let jwt: JWTPayload
+    try {
+      jwt = await verifyJwsAccessToken(token, {
+        jwksFetch: jwks,
+        verifyOptions: { issuer: authIssuer, audience: mcpResource },
+      })
+    } catch {
+      // Expired / invalid / wrong issuer or audience — re-challenge so the
+      // client re-runs the OAuth flow.
+      return unauthorized("invalid token")
+    }
+
+    return dispatch(request, jwt)
+  }
 
   handlerCache.set(env, handler)
   return handler

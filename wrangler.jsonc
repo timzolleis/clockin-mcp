@@ -1,12 +1,25 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "clockin-mcp",
-  "compatibility_date": "2026-05-01",
+  "compatibility_date": "2026-05-30",
   "compatibility_flags": ["nodejs_compat"],
   "main": "workers/app.ts",
   "assets": {
     "directory": "dist/client",
   },
+  // Pinned so deploys don't silently revert what's configured in the dashboard.
+  // The Worker is served only on its custom domain; workers.dev + preview URLs
+  // stay off so the OAuth/MCP server isn't exposed on a second origin (where the
+  // token audience wouldn't match anyway).
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "clockin-mcp.timzolleis.com",
+      "zone_name": "timzolleis.com",
+      "custom_domain": true,
+    },
+  ],
   "observability": {
     "enabled": true,
   },
