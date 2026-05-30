@@ -23,6 +23,7 @@ import {
   AccountConfigurationStatusResponse,
   AccountSetupResponse,
 } from "~/features/clockin/router/clockin-api-group"
+import { ConnectionsApiGroupLive } from "~/features/connections/router/connections-api-group.server"
 import { AuthenticatedUser } from "~/lib/api/middleware/auth-middleware"
 import { BetterAuthMiddlewareLive } from "~/lib/api/middleware/better-auth-middleware.server"
 import { EnvMiddlewareLive } from "~/lib/api/middleware/env-middleware.server"
@@ -318,6 +319,12 @@ export const ClockinApiGroupLive = HttpApiBuilder.group(
 export const ApiV1GroupLive = HttpApiBuilder.api(ApiV1Group).pipe(
   Layer.provide(
     ClockinApiGroupLive.pipe(
+      Layer.provide(BetterAuthMiddlewareLive),
+      Layer.provide(EnvMiddlewareLive)
+    )
+  ),
+  Layer.provide(
+    ConnectionsApiGroupLive.pipe(
       Layer.provide(BetterAuthMiddlewareLive),
       Layer.provide(EnvMiddlewareLive)
     )
