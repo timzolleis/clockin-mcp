@@ -1,0 +1,15 @@
+# Local development secrets for `pnpm dev` (Cloudflare Workers / wrangler).
+# Copy to `.dev.vars` (gitignored) and fill in. Non-secret vars like
+# BETTER_AUTH_URL live in wrangler.jsonc `vars`.
+
+# Signs sessions and JWTs. openssl rand -base64 32
+BETTER_AUTH_SECRET=
+
+# Encrypts stored Clockin tokens at rest (AES-256-GCM). 32 bytes, base64.
+# openssl rand -base64 32
+# Treat as permanent — rotating it invalidates every stored credential.
+TOKEN_ENCRYPTION_KEY=
+
+# Optional. Upstream Clockin API base URL.
+# Defaults to https://mobile.clockin.de/v2 when unset.
+# CLOCKIN_BASE_URL=https://mobile.clockin.de/v2

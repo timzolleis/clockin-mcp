@@ -18,7 +18,4 @@
       "migrations_dir": "db/migrations",
     },
   ],
-  "vars": {
-    "BETTER_AUTH_URL": "http://localhost:5173",
-  },
 }
