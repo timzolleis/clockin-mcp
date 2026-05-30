@@ -1,4 +1,5 @@
 import { mcpHandler } from "@better-auth/oauth-provider"
+import { registerAppTool } from "@modelcontextprotocol/ext-apps/server"
 import { McpServer as OriginalMcpServer } from "@modelcontextprotocol/sdk/server/mcp"
 import type { JWTPayload } from "better-auth"
 import { Cause, Context, Effect, Layer, ManagedRuntime } from "effect"
@@ -7,16 +8,30 @@ import type { AppLoadContext } from "react-router"
 import { z } from "zod"
 import { ClockinCredentialsService } from "~/features/clockin/credentials/credentials-service"
 import { ServicesLive } from "~/features/clockin/router/request-services.server"
-import { CurrentClockinCredentials } from "~/features/clockin/service/clockin-client"
-import { ClockinEvents } from "~/features/clockin/service/clockin-events"
-import { ClockinProjects } from "~/features/clockin/service/clockin-projects"
-import { ClockinStatus } from "~/features/clockin/service/clockin-status"
-import { ClockinTimesheets } from "~/features/clockin/service/clockin-timesheets"
-import { ClockinWorkdays } from "~/features/clockin/service/clockin-workdays"
+import { CurrentClockinCredentials } from "~/features/clockin/client"
+import {
+  ClockinEvents,
+  ClockinProjects,
+  ClockinStatus,
+  ClockinTimesheets,
+  ClockinWorkdays,
+  currentDay,
+  formatDuration,
+  projectsPhrase,
+  summarizeDay,
+} from "~/features/clockin/service"
 import { CredentialsNotFoundError, UserId } from "~/lib/domain/credentials"
 import { ProjectDateId, ProjectId } from "~/lib/domain/project"
 import { cloudflareEnvLayer } from "~/lib/effect/cloudflare-env"
 import { DatabaseLive } from "~/lib/effect/db"
+import {
+  confirmWidget,
+  projectsWidget,
+  registerWidgetResources,
+  statusWidget,
+  timeOverviewWidget,
+  workdaysWidget,
+} from "~/lib/mcp/widgets"
 
 // ---------------------------------------------------------------------------
 // Per-request value tags
@@ -127,96 +142,248 @@ const registerTools = (runtime: ToolRuntime) =>
     ) =>
       runtime.runPromise(transformErrors(withCredentials(userId)(effect)))
 
-    server.registerTool(
+    // After an action posts its event, read today's workday back so the result
+    // can carry a ready-to-speak summary ("7h 48m logged today across 2
+    // projects"). Best-effort: a failed read degrades to `null` rather than
+    // failing the action that already succeeded. Project names resolve through
+    // the workdays service, so a just-started project appears here by name.
+    const today = ClockinWorkdays.pipe(
+      Effect.flatMap((w) => w.summaries()),
+      Effect.map((s) => summarizeDay(currentDay(s))),
+      Effect.catchAll(() => Effect.succeed(null)),
+    )
+
+    // Every widget's HTML resource, registered once. Tools below opt in by
+    // pointing `_meta.ui.resourceUri` at the matching `*.uri`.
+    registerWidgetResources(server)
+
+    registerAppTool(
+      server,
       "current_status",
       {
         description:
-          "What am I currently doing? Returns a human-readable description plus structured fields: state ('working' | 'on_break' | 'working_on_project' | 'clocked_out' | ...), since (ISO timestamp), and project ({id,name}) when working on one. Self-contained — no extra lookups needed to answer 'what am I doing right now?'.",
+          "What am I currently doing? Returns a human-readable description plus structured fields: state ('working' | 'on_break' | 'working_on_project' | 'clocked_out' | ...), since (ISO timestamp), forSeconds, and project ({id,name}) when working on one. Self-contained — no extra lookups needed to answer 'what am I doing right now?'.",
         inputSchema: {},
+        _meta: { ui: { resourceUri: statusWidget.uri } },
       },
       () => run(Effect.flatMap(ClockinStatus, (s) => s.current())),
     )
 
-    server.registerTool(
+    registerAppTool(
+      server,
       "clock_in",
-      { description: "Start the workday — clock in.", inputSchema: {} },
-      () =>
-        run(
-          Effect.flatMap(ClockinEvents, (e) => e.clockIn()).pipe(
-            Effect.as("Clocked in."),
-          ),
-        ),
-    )
-
-    server.registerTool(
-      "clock_out",
-      { description: "End the workday — clock out.", inputSchema: {} },
-      () =>
-        run(
-          Effect.flatMap(ClockinEvents, (e) => e.clockOut()).pipe(
-            Effect.as("Clocked out."),
-          ),
-        ),
-    )
-
-    server.registerTool(
-      "start_break",
       {
-        description: "Begin a break. Time stops counting as work.",
+        description:
+          "Start the workday — clock in. Returns { message, clockedInAt (ISO), today, display }. `message` is a ready confirmation; `today` carries the day's totals so far. Speak `message` back to the user.",
         inputSchema: {},
+        _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
       () =>
         run(
-          Effect.flatMap(ClockinEvents, (e) => e.startBreak()).pipe(
-            Effect.as("Break started."),
-          ),
+          Effect.gen(function* () {
+            const events = yield* ClockinEvents
+            const at = new Date().toISOString()
+            yield* events.clockIn()
+            const day = yield* today
+            const resumed = day != null && day.workedSeconds > 0
+            const message = resumed
+              ? `Clocked in — ${day.worked} already logged today.`
+              : "Clocked in. Your workday is running."
+            const detail = resumed
+              ? `${day.worked} already logged today.`
+              : "Your workday is running."
+            return {
+              message,
+              clockedInAt: at,
+              today: day,
+              display: { tone: "good", title: "Clocked in", at, detail },
+            }
+          }),
         ),
     )
 
-    server.registerTool(
+    registerAppTool(
+      server,
+      "clock_out",
+      {
+        description:
+          "End the workday — clock out. Returns { message, clockedOutAt (ISO), today: { worked, workedSeconds, onBreak, clockedIn, projects[], projectCount }, display }. `message` already reads e.g. 'Clocked out — 7h 48m logged today across 2 projects.' — speak it back.",
+        inputSchema: {},
+        _meta: { ui: { resourceUri: confirmWidget.uri } },
+      },
+      () =>
+        run(
+          Effect.gen(function* () {
+            const events = yield* ClockinEvents
+            const at = new Date().toISOString()
+            yield* events.clockOut()
+            const day = yield* today
+            const logged = day != null && day.workedSeconds > 0
+            const phrase = day ? projectsPhrase(day.projectCount) : ""
+            const message = logged
+              ? `Clocked out — ${day.worked} logged today${phrase}.`
+              : "Clocked out."
+            const detail = logged
+              ? `${day.worked} logged today${phrase}.`
+              : "Workday ended."
+            return {
+              message,
+              clockedOutAt: at,
+              today: day,
+              display: { tone: "good", title: "Clocked out", at, detail },
+            }
+          }),
+        ),
+    )
+
+    registerAppTool(
+      server,
+      "start_break",
+      {
+        description:
+          "Begin a break. Time stops counting as work. Returns { message, breakStartedAt (ISO), today, display }. Speak `message` back.",
+        inputSchema: {},
+        _meta: { ui: { resourceUri: confirmWidget.uri } },
+      },
+      () =>
+        run(
+          Effect.gen(function* () {
+            const events = yield* ClockinEvents
+            const at = new Date().toISOString()
+            yield* events.startBreak()
+            const day = yield* today
+            const logged = day != null && day.workedSeconds > 0
+            const message = logged
+              ? `Break started — ${day.worked} logged so far today. The clock is paused.`
+              : "Break started. The clock is paused."
+            const detail = logged
+              ? `${day.worked} logged so far. Time stops counting until you're back.`
+              : "Time stops counting as work until you're back."
+            return {
+              message,
+              breakStartedAt: at,
+              today: day,
+              display: { tone: "iris", title: "Break started", at, detail },
+            }
+          }),
+        ),
+    )
+
+    registerAppTool(
+      server,
       "resume_work",
       {
         description:
-          "Return from a break (or any non-work task) to general work time.",
+          "Return from a break (or any non-work task) to general work time. Returns { message, resumedAt (ISO), away: { duration, seconds, since } | null, today, display }. When you were on a break, `message` reads e.g. 'Back to work — you were away for 42m.' — speak it back.",
         inputSchema: {},
+        _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
       () =>
         run(
-          Effect.flatMap(ClockinEvents, (e) => e.resumeWork()).pipe(
-            Effect.as("Back to work."),
-          ),
+          Effect.gen(function* () {
+            const status = yield* ClockinStatus
+            const events = yield* ClockinEvents
+            // Capture the break length BEFORE resuming — accurate regardless of
+            // read-back consistency. Best-effort: a failed read just drops it.
+            const before = yield* status
+              .current()
+              .pipe(Effect.catchAll(() => Effect.succeed(null)))
+            const at = new Date().toISOString()
+            yield* events.resumeWork()
+            const day = yield* today
+            const away =
+              before != null && before.state === "on_break"
+                ? {
+                    since: before.since,
+                    seconds: before.forSeconds,
+                    duration: formatDuration(before.forSeconds),
+                  }
+                : null
+            const message = away
+              ? `Back to work — you were away for ${away.duration}.`
+              : "Back to work."
+            const detail = away
+              ? `You were away for ${away.duration}.`
+              : "Welcome back."
+            return {
+              message,
+              resumedAt: at,
+              away,
+              today: day,
+              display: { tone: "good", title: "Back to work", at, detail },
+            }
+          }),
         ),
     )
 
-    server.registerTool(
+    registerAppTool(
+      server,
       "start_project_work",
       {
         description:
-          "Switch to working on a specific project. Use `list_projects` first to find the project_id.",
+          "Start working on a specific project. Clocks in first if you're " +
+          "clocked out, then attaches the project; if you're already clocked " +
+          "in it just switches to the project. Use `list_projects` first to " +
+          "find the project_id. Returns { message, project: { id, name }, " +
+          "startedAt (ISO), today, display } — speak `message` back.",
         inputSchema: {
           project_id: z.number().int().positive(),
           project_date_id: z.number().int().positive().optional(),
         },
+        _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
       ({ project_id, project_date_id }) =>
         run(
-          Effect.flatMap(ClockinEvents, (e) =>
-            e.startProject(
-              ProjectId.make(project_id),
+          Effect.gen(function* () {
+            const status = yield* ClockinStatus
+            const events = yield* ClockinEvents
+            const current = yield* status.current()
+            const wasClockedOut = current.state === "clocked_out"
+            const projectId = ProjectId.make(project_id)
+            const projectDateId =
               project_date_id != null
                 ? ProjectDateId.make(project_date_id)
-                : undefined,
-            ),
-          ).pipe(Effect.as(`Started working on project ${project_id}.`)),
+                : undefined
+            const at = new Date().toISOString()
+            if (wasClockedOut) {
+              yield* events.clockInAndSwitchToProject(projectId, projectDateId)
+            } else {
+              yield* events.switchToProject(projectId, projectDateId)
+            }
+            const day = yield* today
+            const name =
+              day?.projects.find((p) => p.id === project_id)?.name ?? null
+            const label = name ? `"${name}"` : `project ${project_id}`
+            const message = wasClockedOut
+              ? `Clocked in and started working on ${label}.`
+              : `Now tracking ${label}.`
+            const detail = wasClockedOut
+              ? "Workday opened with the project attached."
+              : "Switched your active project."
+            return {
+              message,
+              project: { id: project_id, name },
+              startedAt: at,
+              today: day,
+              display: {
+                tone: "good",
+                title: name ? `Now tracking · ${name}` : "Now tracking project",
+                at,
+                detail,
+              },
+            }
+          }),
         ),
     )
 
-    server.registerTool(
+    registerAppTool(
+      server,
       "list_projects",
       {
         description:
-          "List projects. Optionally filter by a substring query. Returns project ids and names.",
+          "List projects. Optionally filter by a substring query. Returns an array of { id, name }.",
         inputSchema: { query: z.string().optional() },
+        _meta: { ui: { resourceUri: projectsWidget.uri } },
       },
       ({ query }) =>
         run(
@@ -226,22 +393,26 @@ const registerTools = (runtime: ToolRuntime) =>
         ),
     )
 
-    server.registerTool(
+    registerAppTool(
+      server,
       "list_workdays",
       {
         description:
           "Recent workdays rolled up per day with durations and totals. Each entry has: date, startedAt/endedAt, ongoing, segments (each with type, project, startedAt/endedAt, durationSeconds), and totals { clockedInSeconds, workSeconds, breakSeconds, perProject }. Sufficient to answer 'how much have I worked today / on project X' without any further math.",
         inputSchema: {},
+        _meta: { ui: { resourceUri: workdaysWidget.uri } },
       },
       () => run(Effect.flatMap(ClockinWorkdays, (w) => w.summaries())),
     )
 
-    server.registerTool(
+    registerAppTool(
+      server,
       "time_overview",
       {
         description:
           "One-call time balance overview: { currentWeek: { weekStarting, workedHours, targetHours, remainingHours }, currentMonth: { workedHours, targetHours, remainingHours, overtimeHours }, annualFlextimeHours, used/planned/max vacation days }. Hours are decimals (e.g. 7.5 = 7h30m). Sufficient to answer 'how much have I worked this week / month, how much do I still need, what's my flextime / vacation'.",
         inputSchema: {},
+        _meta: { ui: { resourceUri: timeOverviewWidget.uri } },
       },
       () => run(Effect.flatMap(ClockinTimesheets, (t) => t.overview())),
     )
