@@ -1,11 +1,7 @@
-import { HttpApiBuilder, HttpServer } from "@effect/platform"
-import { Layer } from "effect"
-import { ApiV1GroupLive } from "~/lib/api/clockin-api-group.server"
+import { handleV1 } from "~/lib/api/v1-handler.server"
 import type { Route } from "./+types/api.v1.$"
 
-const { handler } = HttpApiBuilder.toWebHandler(
-  ApiV1GroupLive.pipe(Layer.provideMerge(HttpServer.layerContext)),
-)
-
-export const loader = ({ request }: Route.LoaderArgs) => handler(request)
-export const action = ({ request }: Route.ActionArgs) => handler(request)
+export const loader = ({ request, context }: Route.LoaderArgs) =>
+  handleV1(request, context)
+export const action = ({ request, context }: Route.ActionArgs) =>
+  handleV1(request, context)

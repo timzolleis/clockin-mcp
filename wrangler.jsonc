@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "clockin-mcp",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "workers/app.ts",
+  "assets": {
+    "directory": "dist/client",
+  },
+  "observability": {
+    "enabled": true,
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "clockin-mcp",
+      "database_id": "fe211e6c-dc71-4417-b1a7-580a0e71ef79",
+      "migrations_dir": "db/migrations",
+    },
+  ],
+  "vars": {
+    "BETTER_AUTH_URL": "http://localhost:5173",
+  },
+}

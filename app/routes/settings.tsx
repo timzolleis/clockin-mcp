@@ -1,9 +1,12 @@
 import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { effectTsResolver } from "@hookform/resolvers/effect-ts"
+import { Schema } from "effect"
 import { useEffect, useState } from "react"
+import { FormProvider, useForm } from "react-hook-form"
 import { authClient } from "~/lib/auth-client"
+import { EmailField, PasswordField } from "~/lib/forms/fields"
+import { TextField } from "~/components/form/text-field"
 import { Button } from "~/components/ui/button"
-import { Input } from "~/components/ui/input"
-import { Label } from "~/components/ui/label"
 import {
   Card,
   CardContent,
@@ -12,12 +15,19 @@ import {
   CardHeader,
   CardTitle,
 } from "~/components/ui/card"
+import { FieldError, FieldGroup } from "~/components/ui/field"
 import { PageHeader, PageShell } from "~/components/layout/page"
 import {
   clockinStatusAtom,
   setupClockinMutation,
   SETUP_INVALIDATIONS,
 } from "~/features/clockin/atoms/clockin-atoms"
+
+const ConnectSchema = Schema.Struct({
+  email: EmailField,
+  password: PasswordField,
+})
+type ConnectValues = typeof ConnectSchema.Type
 
 function useMcpUrl() {
   const [url, setUrl] = useState<string | null>(null)
@@ -29,10 +39,10 @@ function StatusBadge() {
   const status = useAtomValue(clockinStatusAtom)
   return Result.builder(status)
     .onInitial(() => (
-      <span className="text-muted-foreground text-sm">Loading…</span>
+      <span className="text-sm text-muted-foreground">Loading…</span>
     ))
     .onFailure(() => (
-      <span className="text-destructive text-sm">Status unavailable</span>
+      <span className="text-sm text-destructive">Status unavailable</span>
     ))
     .onSuccess((s) =>
       s.configured ? (
@@ -43,8 +53,8 @@ function StatusBadge() {
             : ""}
         </span>
       ) : (
-        <span className="text-muted-foreground text-sm">Not configured</span>
-      ),
+        <span className="text-sm text-muted-foreground">Not configured</span>
+      )
     )
     .render()
 }
@@ -58,12 +68,31 @@ function ConnectCard() {
   })
 
   const runSetup = useAtomSet(setupClockinMutation, { mode: "promise" })
-  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<{
     employeeId: number
     autoDetected: boolean
   } | null>(null)
+
+  const form = useForm<ConnectValues>({
+    resolver: effectTsResolver(ConnectSchema),
+    defaultValues: { email: "", password: "" },
+  })
+
+  const onSubmit = form.handleSubmit(async (values) => {
+    setError(null)
+    setSuccess(null)
+    try {
+      const result = await runSetup({
+        payload: values,
+        reactivityKeys: SETUP_INVALIDATIONS,
+      })
+      setSuccess(result)
+      form.reset(values)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  })
 
   return (
     <Card>
@@ -77,75 +106,45 @@ function ConnectCard() {
           <StatusBadge />
         </div>
       </CardHeader>
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault()
-          setError(null)
-          setSuccess(null)
-          const fd = new FormData(e.currentTarget)
-          const overrideRaw = String(fd.get("employee_id") ?? "").trim()
-          const override = overrideRaw ? Number(overrideRaw) : null
-          setPending(true)
-          try {
-            const result = await runSetup({
-              payload: {
-                email: String(fd.get("email")),
-                password: String(fd.get("password")),
-                employeeIdOverride: override,
-              },
-              reactivityKeys: SETUP_INVALIDATIONS,
-            })
-            setSuccess(result)
-          } catch (err) {
-            setError(err instanceof Error ? err.message : String(err))
-          } finally {
-            setPending(false)
-          }
-        }}
-      >
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email">Clockin email</Label>
-            <Input id="email" name="email" type="email" required />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Clockin password</Label>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              required
-              autoComplete="current-password"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="employee_id">Employee ID (optional)</Label>
-            <Input
-              id="employee_id"
-              name="employee_id"
-              type="number"
-              min={1}
-              placeholder="auto-detected via /device/config"
-            />
-          </div>
-          {error ? (
-            <p className="text-destructive text-sm">{error}</p>
-          ) : null}
-          {success ? (
-            <p className="text-sm text-emerald-600">
-              Connected. Employee ID {success.employeeId}
-              {success.autoDetected
-                ? " (auto-detected)."
-                : " (manual override)."}
-            </p>
-          ) : null}
-        </CardContent>
-        <CardFooter className="justify-end pt-6">
-          <Button type="submit" disabled={pending}>
-            {pending ? "Connecting…" : configured ? "Reconnect" : "Connect"}
-          </Button>
-        </CardFooter>
-      </form>
+      <FormProvider {...form}>
+        <form onSubmit={onSubmit}>
+          <CardContent>
+            <FieldGroup>
+              <TextField<ConnectValues>
+                name="email"
+                label="Clockin email"
+                type="email"
+                autoComplete="username"
+              />
+              <TextField<ConnectValues>
+                name="password"
+                label="Clockin password"
+                type="password"
+                autoComplete="current-password"
+                description="Used once to authenticate; never stored."
+              />
+              {error ? <FieldError>{error}</FieldError> : null}
+              {success ? (
+                <p className="text-sm text-emerald-600">
+                  Connected. Employee ID {success.employeeId}
+                  {success.autoDetected
+                    ? " (auto-detected)."
+                    : " (manual override)."}
+                </p>
+              ) : null}
+            </FieldGroup>
+          </CardContent>
+          <CardFooter className="mt-6 justify-end">
+            <Button type="submit" disabled={form.formState.isSubmitting}>
+              {form.formState.isSubmitting
+                ? "Connecting…"
+                : configured
+                  ? "Reconnect"
+                  : "Connect"}
+            </Button>
+          </CardFooter>
+        </form>
+      </FormProvider>
     </Card>
   )
 }
@@ -162,7 +161,7 @@ function McpEndpointCard() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <code className="bg-muted block rounded-md px-3 py-2 text-sm break-all">
+        <code className="block rounded-md bg-muted px-3 py-2 text-sm break-all">
           {mcpUrl ?? "…"}
         </code>
       </CardContent>
@@ -184,7 +183,9 @@ export default function Settings() {
             variant="ghost"
             size="sm"
             onClick={() =>
-              authClient.signOut().then(() => window.location.assign("/sign-in"))
+              authClient
+                .signOut()
+                .then(() => window.location.assign("/sign-in"))
             }
           >
             Sign out

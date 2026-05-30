@@ -1,10 +1,15 @@
 .DS_Store
 .env
+.dev.vars
 /node_modules/
 
 # React Router
 /.react-router/
 /build/
+/dist/
+
+# Cloudflare / Wrangler
+/.wrangler/
 
 # SQLite data
 /data/

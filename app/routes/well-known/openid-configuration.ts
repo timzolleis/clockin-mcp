@@ -1,7 +1,13 @@
 import { oauthProviderOpenIdConfigMetadata } from "@better-auth/oauth-provider"
-import { auth } from "~/lib/auth"
+import { Effect } from "effect"
+import { AuthService } from "~/lib/auth"
+import { provideAuth } from "~/lib/auth-effect.server"
 import type { Route } from "./+types/openid-configuration"
 
-const handler = oauthProviderOpenIdConfigMetadata(auth)
-
-export const loader = ({ request }: Route.LoaderArgs) => handler(request)
+export const loader = ({ request, context }: Route.LoaderArgs) =>
+  Effect.gen(function* () {
+    const auth = yield* AuthService
+    return yield* Effect.promise(() =>
+      oauthProviderOpenIdConfigMetadata(auth)(request),
+    )
+  }).pipe(provideAuth(context.cloudflare.env), Effect.runPromise)

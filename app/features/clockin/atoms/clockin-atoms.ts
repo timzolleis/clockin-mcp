@@ -26,17 +26,10 @@ export const clockinOverviewAtom = AtomV1ApiClient.query("clockin", "overview", 
   reactivityKeys: [CLOCKIN_OVERVIEW_KEY, CLOCKIN_STATUS_KEY],
 })
 
-export const clockinProjectsAtom = Atom.family((query: string) =>
-  AtomV1ApiClient.query("clockin", "projects", {
-    payload: { query: query || null },
-    reactivityKeys: [CLOCKIN_PROJECTS_KEY, CLOCKIN_STATUS_KEY],
-  }),
-)
 
-// ---- Mutations ----
-//
-// reactivityKeys are passed at call time, e.g.:
-//   runClockIn({ reactivityKeys: EVENT_INVALIDATIONS })
+export const clockinProjectsAtom = AtomV1ApiClient.query("clockin", "projects", {
+  reactivityKeys: [CLOCKIN_PROJECTS_KEY, CLOCKIN_STATUS_KEY],
+})
 
 export const EVENT_INVALIDATIONS = [
   CLOCKIN_CURRENT_KEY,

@@ -2,7 +2,7 @@ import { AtomHttpApi } from "@effect-atom/atom-react"
 import { FetchHttpClient, HttpClient } from "@effect/platform"
 import { Layer } from "effect"
 
-import { ApiV1Group } from "~/lib/api/api-v1-group"
+import { ApiV1Group } from "~/lib/api/v1/api-v1-group"
 
 // Send cookies so better-auth's session cookie is included on every call.
 const FetchWithCredentials = FetchHttpClient.layer.pipe(

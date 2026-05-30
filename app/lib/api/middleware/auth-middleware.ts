@@ -1,6 +1,6 @@
 import { HttpApiMiddleware } from "@effect/platform"
 import { Context } from "effect"
-import { UnauthorizedError } from "~/lib/api/errors"
+import { UnauthorizedError } from "~/lib/api/middleware/authentication-errors"
 
 export interface AuthenticatedUserData {
   readonly id: string
