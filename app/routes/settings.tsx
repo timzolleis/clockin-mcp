@@ -1,9 +1,21 @@
 import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import { effectTsResolver } from "@hookform/resolvers/effect-ts"
 import { Schema } from "effect"
-import { Check, Copy, Loader2 } from "lucide-react"
+import {
+  Boxes,
+  Check,
+  Clock,
+  Copy,
+  Eye,
+  EyeOff,
+  Loader2,
+  LogOut,
+  SquareTerminal,
+  User,
+} from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 import { useEffect, useState } from "react"
-import { FormProvider, useForm } from "react-hook-form"
+import { FormProvider, useForm, useFormContext } from "react-hook-form"
 import { authClient } from "~/lib/auth-client"
 import { EmailField, PasswordField } from "~/lib/forms/fields"
 import { TextField } from "~/components/form/text-field"
@@ -16,9 +28,21 @@ import {
   CardHeader,
   CardTitle,
 } from "~/components/ui/card"
-import { FieldError, FieldGroup } from "~/components/ui/field"
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "~/components/ui/field"
+import { Input } from "~/components/ui/input"
 import { PageHeader, PageShell } from "~/components/layout/page"
+import type { Route } from "./+types/settings"
 import { cn } from "~/lib/utils"
+
+export function meta(_: Route.MetaArgs) {
+  return [{ title: "Settings — clockin-mcp" }]
+}
 import {
   clockinStatusAtom,
   setupClockinMutation,
@@ -48,7 +72,7 @@ function StatusDot({ tone }: { tone: "ok" | "muted" | "error" }) {
     <span
       className={cn(
         "size-2 shrink-0 rounded-full",
-        tone === "ok" && "bg-emerald-500",
+        tone === "ok" && "status-pulse bg-[var(--color-good)]",
         tone === "muted" && "bg-muted-foreground/40",
         tone === "error" && "bg-destructive"
       )}
@@ -56,41 +80,120 @@ function StatusDot({ tone }: { tone: "ok" | "muted" | "error" }) {
   )
 }
 
+function StatusBadge({
+  tone,
+  children,
+}: {
+  tone: "ok" | "muted" | "error"
+  children: React.ReactNode
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium",
+        tone === "ok" && "border-border bg-muted text-foreground",
+        tone === "muted" && "border-border bg-muted text-muted-foreground",
+        tone === "error" && "border-destructive/30 bg-destructive/10 text-destructive"
+      )}
+    >
+      <StatusDot tone={tone} />
+      {children}
+    </span>
+  )
+}
+
+function MetaBadge({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: LucideIcon
+  label: string
+  value: React.ReactNode
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-xs">
+      <Icon className="size-3.5 text-muted-foreground" aria-label={label} />
+      <span className="font-mono text-foreground/90">{value}</span>
+    </span>
+  )
+}
+
 function ConnectionStatusRow() {
   const status = useAtomValue(clockinStatusAtom)
   return Result.builder(status)
-    .onInitial(() => (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <StatusDot tone="muted" />
-        Loading status…
-      </div>
-    ))
+    .onInitial(() => <StatusBadge tone="muted">Loading…</StatusBadge>)
     .onFailure(() => (
-      <div className="flex items-center gap-2 text-sm text-destructive">
-        <StatusDot tone="error" />
-        Status unavailable
-      </div>
+      <StatusBadge tone="error">Status unavailable</StatusBadge>
     ))
     .onSuccess((s) =>
       s.configured ? (
-        <div className="flex items-center gap-2 text-sm">
-          <StatusDot tone="ok" />
-          <span className="font-medium text-foreground">Connected</span>
-          <span className="text-muted-foreground">
-            · employee {s.employeeId}
-            {s.updatedAt
-              ? ` · updated ${new Date(s.updatedAt).toLocaleDateString()}`
-              : ""}
-          </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge tone="ok">Connected</StatusBadge>
+          <MetaBadge icon={User} label="employee" value={s.employeeId} />
+          {s.updatedAt ? (
+            <MetaBadge
+              icon={Clock}
+              label="updated"
+              value={new Date(s.updatedAt).toLocaleDateString()}
+            />
+          ) : null}
         </div>
       ) : (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <StatusDot tone="muted" />
-          Not connected
-        </div>
+        <StatusBadge tone="muted">Not connected</StatusBadge>
       )
     )
     .render()
+}
+
+/**
+ * Password input wired to the surrounding form, with a show/hide toggle.
+ * Lives here rather than in the shared TextField since it's the only
+ * field that needs the trailing reveal control.
+ */
+function PasswordInputField({
+  name,
+  label,
+  description,
+  autoComplete,
+}: {
+  name: "password"
+  label: string
+  description?: string
+  autoComplete?: string
+}) {
+  const {
+    register,
+    formState: { errors },
+  } = useFormContext<ConnectValues>()
+  const [show, setShow] = useState(false)
+  const error = errors[name] as { message?: string } | undefined
+
+  return (
+    <Field data-invalid={Boolean(error)}>
+      <FieldLabel htmlFor={name}>{label}</FieldLabel>
+      <div className="relative">
+        <Input
+          id={name}
+          type={show ? "text" : "password"}
+          autoComplete={autoComplete}
+          aria-invalid={Boolean(error)}
+          className="pr-11"
+          {...register(name)}
+        />
+        <button
+          type="button"
+          onClick={() => setShow((v) => !v)}
+          aria-label={show ? "Hide password" : "Show password"}
+          className="absolute inset-y-0 right-1.5 my-auto flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+        </button>
+      </div>
+      {description ? <FieldDescription>{description}</FieldDescription> : null}
+      <FieldError errors={error ? [error] : undefined} />
+    </Field>
+  )
 }
 
 function ConnectCard() {
@@ -134,7 +237,8 @@ function ConnectCard() {
         <CardTitle>Clockin account</CardTitle>
         <CardDescription>
           We log in to Clockin on your behalf and store the resulting tokens
-          encrypted (AES-256-GCM). Your password is never persisted.
+          encrypted (<span className="font-mono text-foreground/80">AES-256-GCM</span>).
+          Your password is never persisted.
         </CardDescription>
         <div className="pt-3">
           <ConnectionStatusRow />
@@ -150,16 +254,15 @@ function ConnectCard() {
                 type="email"
                 autoComplete="username"
               />
-              <TextField<ConnectValues>
+              <PasswordInputField
                 name="password"
                 label="Clockin password"
-                type="password"
                 autoComplete="current-password"
                 description="Used once to authenticate; never stored."
               />
               {error ? <FieldError>{error}</FieldError> : null}
               {success ? (
-                <p className="text-sm text-emerald-600">
+                <p className="text-sm text-[var(--color-good)]">
                   Connected. Employee ID {success.employeeId}
                   {success.autoDetected
                     ? " (auto-detected)."
@@ -170,6 +273,9 @@ function ConnectCard() {
           </CardContent>
           <CardFooter className="mt-6 justify-end">
             <Button type="submit" disabled={form.formState.isSubmitting}>
+              {form.formState.isSubmitting ? (
+                <Loader2 className="animate-spin" />
+              ) : null}
               {form.formState.isSubmitting
                 ? "Connecting…"
                 : configured
@@ -179,6 +285,132 @@ function ConnectCard() {
           </CardFooter>
         </form>
       </FormProvider>
+    </Card>
+  )
+}
+
+type Snippet = { label: string; code: string; hint?: string }
+
+/** shadcn-style tabbed command block: tool tabs + copy, code body below. */
+function CodeTabs({ snippets }: { snippets: Snippet[] }) {
+  const [active, setActive] = useState(0)
+  const [copied, setCopied] = useState(false)
+  const current = snippets[active]
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(current.code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard blocked — the command stays selectable.
+    }
+  }
+
+  return (
+    <div className="overflow-hidden rounded-[14px] border border-border bg-muted">
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <SquareTerminal className="size-4 shrink-0 text-muted-foreground" />
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          {snippets.map((s, i) => (
+            <button
+              key={s.label}
+              type="button"
+              onClick={() => {
+                setActive(i)
+                setCopied(false)
+              }}
+              className={cn(
+                "shrink-0 rounded-[8px] px-2.5 py-1 text-xs font-medium transition-colors",
+                i === active
+                  ? "border border-border bg-background text-foreground"
+                  : "border border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={copy}
+          aria-label="Copy command"
+          className="flex size-7 shrink-0 items-center justify-center rounded-[7px] text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+        >
+          {copied ? (
+            <Check className="size-3.5 text-[var(--color-good)]" />
+          ) : (
+            <Copy className="size-3.5" />
+          )}
+        </button>
+      </div>
+      <div className="overflow-x-auto px-4 py-3.5">
+        {current.hint ? (
+          <p className="mb-2 font-mono text-xs text-muted-foreground/70">
+            {current.hint}
+          </p>
+        ) : null}
+        <pre className="font-mono text-sm leading-relaxed text-foreground/90">
+          <code>{current.code}</code>
+        </pre>
+      </div>
+    </div>
+  )
+}
+
+function ClientSetupCard() {
+  const mcpUrl = useMcpUrl()
+  const url = mcpUrl ?? "https://your-app.example/mcp"
+
+  const snippets: Snippet[] = [
+    {
+      label: "Claude Code",
+      code: `claude mcp add --transport http clockin ${url}`,
+    },
+    {
+      label: "Codex",
+      code: `codex mcp add clockin --url ${url}`,
+    },
+    {
+      label: "VS Code",
+      hint: ".vscode/mcp.json",
+      code: `{
+  "mcpServers": {
+    "clockin": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "${url}"]
+    }
+  }
+}`,
+    },
+    {
+      label: "Zed",
+      hint: "settings.json",
+      code: `{
+  "context_servers": {
+    "clockin": {
+      "source": "custom",
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "${url}"],
+      "env": {}
+    }
+  }
+}`,
+    },
+  ]
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Add to your client</CardTitle>
+        <CardDescription>
+          Register this MCP server with your tool of choice. You&apos;ll be
+          prompted to authorize on first connect.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <CodeTabs snippets={snippets} />
+      </CardContent>
     </Card>
   )
 }
@@ -209,18 +441,21 @@ function McpEndpointCard() {
       </CardHeader>
       <CardContent>
         <div className="flex items-center gap-2">
-          <code className="flex-1 truncate rounded-2xl bg-muted px-3 py-2 text-sm">
-            {mcpUrl ?? "…"}
-          </code>
+          <Input
+            readOnly
+            value={mcpUrl ?? "…"}
+            aria-label="MCP endpoint URL"
+            className="flex-1 font-mono text-sm"
+          />
           <Button
             type="button"
             variant="outline"
-            size="icon-sm"
+            size="icon"
             onClick={copy}
             disabled={!mcpUrl}
             aria-label="Copy MCP endpoint URL"
           >
-            {copied ? <Check className="text-emerald-600" /> : <Copy />}
+            {copied ? <Check className="text-[var(--color-good)]" /> : <Copy />}
           </Button>
         </div>
       </CardContent>
@@ -254,33 +489,36 @@ function ClientRow({ client }: { client: ConnectedClient }) {
 
   return (
     <div className="flex items-start justify-between gap-4 py-4 first:pt-0 last:pb-0">
-      <div className="min-w-0 space-y-1">
-        <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-start gap-3">
+        <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-[10px] border border-border bg-muted text-muted-foreground">
+          <Boxes className="size-4" />
+        </span>
+        <div className="min-w-0 space-y-1">
           <p className="truncate text-sm font-medium">{title}</p>
+          <p className="font-mono text-xs text-muted-foreground">
+            {client.consentedAt
+              ? `Authorized ${new Date(client.consentedAt).toLocaleDateString()}`
+              : "Authorized"}
+            {client.lastUsedAt
+              ? ` · last used ${new Date(client.lastUsedAt).toLocaleDateString()}`
+              : ""}
+          </p>
+          {client.scopes.length > 0 ? (
+            <div className="flex flex-wrap gap-1 pt-0.5">
+              {client.scopes.map((scope) => (
+                <span
+                  key={scope}
+                  className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                >
+                  {scope}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {error ? (
+            <p className="pt-1 text-xs text-destructive">{error}</p>
+          ) : null}
         </div>
-        <p className="text-xs text-muted-foreground">
-          {client.consentedAt
-            ? `Authorized ${new Date(client.consentedAt).toLocaleDateString()}`
-            : "Authorized"}
-          {client.lastUsedAt
-            ? ` · last used ${new Date(client.lastUsedAt).toLocaleDateString()}`
-            : ""}
-        </p>
-        {client.scopes.length > 0 ? (
-          <div className="flex flex-wrap gap-1 pt-0.5">
-            {client.scopes.map((scope) => (
-              <span
-                key={scope}
-                className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-              >
-                {scope}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        {error ? (
-          <p className="pt-1 text-xs text-destructive">{error}</p>
-        ) : null}
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
@@ -346,10 +584,10 @@ function ConnectedClientsCard() {
           ))
           .onSuccess((clients) =>
             clients.length === 0 ? (
-              <p className="py-4 text-sm text-muted-foreground">
+              <div className="rounded-[10px] border border-dashed border-border px-6 py-8 text-center text-sm text-muted-foreground">
                 No clients connected yet. Connect an MCP client using the
                 endpoint above and it&apos;ll appear here.
-              </p>
+              </div>
             ) : (
               <div className="divide-y divide-border">
                 {clients.map((client) => (
@@ -372,21 +610,30 @@ export default function Settings() {
     <PageShell>
       <PageHeader
         title="Settings"
-        description={email ? `Signed in as ${email}` : undefined}
+        description={
+          email ? (
+            <>
+              Signed in as{" "}
+              <span className="font-mono text-foreground/80">{email}</span>
+            </>
+          ) : undefined
+        }
         trailing={
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
             onClick={() =>
               authClient.signOut().then(() => window.location.assign("/sign-in"))
             }
           >
+            <LogOut />
             Sign out
           </Button>
         }
       />
       <ConnectCard />
       <McpEndpointCard />
+      <ClientSetupCard />
       <ConnectedClientsCard />
     </PageShell>
   )
