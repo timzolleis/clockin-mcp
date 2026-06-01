@@ -4,10 +4,10 @@ import {
   ClockinCorrectionsApiLive,
   type CorrectionWriteError,
 } from "../api"
-import { CurrentClockinCredentials } from "../client"
+import type { CurrentClockinCredentials } from "../client"
 import { ClockinWorkdays, ClockinWorkdaysLive } from "./clockin-workdays"
 import { currentDay, summarizeDay, type DaySummary } from "./clockin-summary"
-import { layTimeline, redistribute, type Bucket } from "./correction-plan"
+import { buildSpan, redistribute, type Bucket } from "./correction-plan"
 import { TaskId } from "./clockin-tasks"
 import { EventId, type EventRead } from "~/lib/domain/event"
 import type { ProjectId } from "~/lib/domain/project"
@@ -24,31 +24,27 @@ import {
 // Result + error channels
 // ---------------------------------------------------------------------------
 
-/** What a correction did — `day` is the rebuilt day, read back best-effort. */
+/** What a correction did — `day` is the resulting day, read back best-effort. */
 export type CorrectionResult = {
   transactionIds: ReadonlyArray<TransactionId>
-  deleted: number
-  stored: number
   day: DaySummary | null
 }
 
-/** Reads (`/correction`) + writes (storeEvent/deleteEvent) share these. */
 type WriteError = CorrectionWriteError
 
 // ---------------------------------------------------------------------------
 // Service interface
 // ---------------------------------------------------------------------------
-// Editing event history by intent. Each method reads the target day from
-// `/correction`, derives the current slices, computes a target timeline (pure,
-// via correction-plan), then wipes-and-replaces the day's events. The clock-out
-// position rides the slice durations, so relative edits ripple the end of day.
+// Editing a workday as ACTIVITY SPANS (Clockin's native correction model):
+//   • editSlice   → one updateEvent on the slice's opening event (the adjacent
+//                   activity absorbs the change; the last slice extends/shrinks
+//                   the day). Ids stay stable — no wipe.
+//   • appendSlice → one storeEvent at the day's end.
+//   • restructureDay → delete the day's events, then storeEvent one span per
+//                   bucket from the day's start (conserves the worked total).
+// All times are rendered employee-local by `buildSpan`.
 
 export interface ClockinCorrectionsService {
-  /**
-   * Redistribute the day's worked time (non-break) across weighted buckets —
-   * "make my day 20% A / 30% B / 50% C". Conserves the worked total; breaks are
-   * not carried into the rebuilt timeline.
-   */
   readonly restructureDay: (plan: {
     date?: string
     buckets: ReadonlyArray<Bucket>
@@ -58,10 +54,6 @@ export interface ClockinCorrectionsService {
     CurrentClockinCredentials
   >
 
-  /**
-   * Resize one existing slice by id — `set` to an absolute length or `add` a
-   * delta. Every other slice is preserved; the day ripples by the difference.
-   */
   readonly editSlice: (edit: {
     sliceId: SliceId
     op: "set" | "add"
@@ -72,7 +64,6 @@ export interface ClockinCorrectionsService {
     CurrentClockinCredentials
   >
 
-  /** Append a new trailing slice, extending the day by its length. */
   readonly appendSlice: (slice: {
     date?: string
     taskId: ClockableTaskId
@@ -93,20 +84,23 @@ export class ClockinCorrections extends Context.Tag("ClockinCorrections")<
 // ---------------------------------------------------------------------------
 // Day derivation (pure)
 // ---------------------------------------------------------------------------
-// Turn a raw `/correction` workday into the pieces reconciliation needs: the
-// day's start, the ordered slices (with their opaque ids), every event id to
-// delete, and the worked total. Mirrors the segment walk in clockin-workdays
-// but keeps the raw task_id (needed to rebuild) and the upstream event ids.
+// Turn a raw `/correction` workday into activities: each non-clock-out event
+// opens a slice that runs to the next event. We keep the opening event's id
+// (to address updateEvent/deleteEvent) and its UTC instant (to render local
+// spans), plus the worked total (breaks excluded) for redistribution.
 
 type DerivedSlice = {
   sliceId: SliceId
+  eventId: EventId | null
   taskId: ClockableTaskId
   projectId: ProjectId | null
+  startUtc: Date
   seconds: number
 }
 
 type DerivedDay = {
-  start: Date | null
+  startUtc: Date | null
+  endUtc: Date | null
   slices: ReadonlyArray<DerivedSlice>
   eventIds: ReadonlyArray<EventId>
   workedSeconds: number
@@ -119,7 +113,6 @@ const secondsBetween = (start: string, end: string): number => {
   return Math.max(0, Math.round((b - a) / 1000))
 }
 
-/** Coerce a read event's optional id (number | numeric string) to an EventId. */
 const toEventId = (raw: EventRead["id"]): EventId | null => {
   if (raw == null) return null
   const n = typeof raw === "number" ? raw : Number(raw)
@@ -137,12 +130,14 @@ const deriveDay = (day: Workday | null, nowIso: string): DerivedDay => {
     const ev = events[i]!
     const id = toEventId(ev.id)
     if (id != null) eventIds.push(id)
-    if (ev.task_id === TaskId.CLOCKOUT) continue // terminator, not a slice
+    if (ev.task_id === TaskId.CLOCKOUT) continue
     const closeAt = events[i + 1]?.occured_at ?? nowIso
     slices.push({
       sliceId: SliceId.make(ev.occured_at),
+      eventId: id,
       taskId: ev.task_id as ClockableTaskId,
       projectId: (ev.project_id ?? null) as ProjectId | null,
+      startUtc: new Date(ev.occured_at),
       seconds: secondsBetween(ev.occured_at, closeAt),
     })
   }
@@ -151,15 +146,16 @@ const deriveDay = (day: Workday | null, nowIso: string): DerivedDay => {
     (n, s) => (s.taskId === TaskId.BREAK ? n : n + s.seconds),
     0,
   )
+  const last = events[events.length - 1]
   return {
-    start: events[0] ? new Date(events[0].occured_at) : null,
+    startUtc: events[0] ? new Date(events[0].occured_at) : null,
+    endUtc: last ? new Date(last.occured_at) : null,
     slices,
     eventIds,
     workedSeconds,
   }
 }
 
-/** The day matching `date`, else the one with the most recent activity. */
 const resolveDay = (workdays: ReadonlyArray<Workday>, date?: string): Workday | null => {
   if (date != null) return workdays.find((w) => w.date === date) ?? null
   let best: Workday | null = null
@@ -175,113 +171,99 @@ const resolveDay = (workdays: ReadonlyArray<Workday>, date?: string): Workday | 
   return best
 }
 
-/** The day whose events include the opening event keyed by `sliceId`. */
 const findDayContaining = (
   workdays: ReadonlyArray<Workday>,
   sliceId: SliceId,
 ): Workday | null =>
   workdays.find((w) => w.events?.some((e) => e.occured_at === sliceId)) ?? null
 
-const isoNoMs = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, "Z")
+const plus = (instant: Date, seconds: number) => new Date(instant.getTime() + seconds * 1000)
+const nowIso = () => new Date().toISOString()
 
 // ---------------------------------------------------------------------------
 // Live implementation
 // ---------------------------------------------------------------------------
 
-// The seam, dependencies left in `R` (ClockinCorrectionsApi + ClockinWorkdays)
-// so tests can drive it through an in-memory api adapter. `ClockinCorrectionsLive`
-// below bakes the production adapters in.
 export const ClockinCorrectionsLayer = Layer.effect(
   ClockinCorrections,
   Effect.gen(function* () {
     const api = yield* ClockinCorrectionsApi
     const workdays = yield* ClockinWorkdays
 
-    // Rebuilt-day summary, best-effort (a failed read degrades to null) — same
-    // read the event tools use for their `today` confirmation.
+    // Resulting-day summary, best-effort (same read the event tools use).
     const readBack = workdays.summaries().pipe(
       Effect.map((s) => summarizeDay(currentDay(s))),
       Effect.catchAll(() => Effect.succeed<DaySummary | null>(null)),
     )
-
-    // Delete every existing event, then store the planned timeline. Returns the
-    // store transaction ids (for undo) and the counts.
-    const wipeAndStore = (
-      eventIds: ReadonlyArray<EventId>,
-      events: ReadonlyArray<Parameters<typeof api.storeEvent>[0]>,
-    ) =>
-      Effect.gen(function* () {
-        for (const id of eventIds) yield* api.deleteEvent(id)
-        const transactionIds: TransactionId[] = []
-        for (const ev of events) {
-          const { transactionId } = yield* api.storeEvent(ev)
-          transactionIds.push(transactionId)
-        }
-        return { transactionIds, deleted: eventIds.length, stored: events.length }
-      })
-
-    const finish = (
-      result: { transactionIds: ReadonlyArray<TransactionId>; deleted: number; stored: number },
-    ) =>
-      Effect.map(readBack, (day): CorrectionResult => ({ ...result, day }))
+    const finish = (transactionIds: ReadonlyArray<TransactionId>) =>
+      Effect.map(readBack, (day): CorrectionResult => ({ transactionIds, day }))
 
     return ClockinCorrections.of({
       restructureDay: ({ date, buckets }) =>
         Effect.gen(function* () {
-          const creds = yield* CurrentClockinCredentials
           const days = yield* api.workdays()
-          const derived = deriveDay(resolveDay(days, date), isoNoMs(new Date()))
-          const start = derived.start ?? new Date()
-          const events = yield* redistribute(
-            start,
-            derived.workedSeconds,
-            buckets,
-            creds.employeeId,
-          )
-          const result = yield* wipeAndStore(derived.eventIds, events)
-          return yield* finish(result)
+          const derived = deriveDay(resolveDay(days, date), nowIso())
+          const start = derived.startUtc ?? new Date()
+          const slices = yield* redistribute(derived.workedSeconds, buckets)
+
+          let cursor = start
+          const spans = slices.map((s) => {
+            const end = plus(cursor, s.seconds)
+            const span = buildSpan(cursor, end, s)
+            cursor = end
+            return span
+          })
+
+          for (const id of derived.eventIds) yield* api.deleteEvent(id)
+          const transactionIds: TransactionId[] = []
+          for (const span of spans) {
+            const { transactionId } = yield* api.storeEvent(span)
+            transactionIds.push(transactionId)
+          }
+          return yield* finish(transactionIds)
         }),
 
       editSlice: ({ sliceId, op, seconds }) =>
         Effect.gen(function* () {
-          const creds = yield* CurrentClockinCredentials
           const days = yield* api.workdays()
           const day = findDayContaining(days, sliceId)
           if (day == null) return yield* new SliceNotFoundError({ sliceId })
-          const derived = deriveDay(day, isoNoMs(new Date()))
-          if (!derived.slices.some((s) => s.sliceId === sliceId)) {
-            return yield* new SliceNotFoundError({ sliceId })
+          const slice = deriveDay(day, nowIso()).slices.find((s) => s.sliceId === sliceId)
+          if (slice == null) return yield* new SliceNotFoundError({ sliceId })
+          if (slice.eventId == null) {
+            return yield* new InvalidCorrectionPlanError({
+              reason: "this slice has no event id and can't be edited",
+            })
           }
-          const slices = derived.slices.map((s) =>
-            s.sliceId === sliceId
-              ? { ...s, seconds: op === "set" ? seconds : s.seconds + seconds }
-              : s,
-          )
-          const events = yield* layTimeline(
-            derived.start ?? new Date(),
-            slices,
-            creds.employeeId,
-          )
-          const result = yield* wipeAndStore(derived.eventIds, events)
-          return yield* finish(result)
+          const newSeconds = op === "set" ? seconds : slice.seconds + seconds
+          if (!Number.isFinite(newSeconds) || newSeconds <= 0) {
+            return yield* new InvalidCorrectionPlanError({
+              reason: "the slice needs a positive duration",
+            })
+          }
+          const span = buildSpan(slice.startUtc, plus(slice.startUtc, newSeconds), slice)
+          const { transactionId } = yield* api.updateEvent(slice.eventId, span)
+          return yield* finish([transactionId])
         }),
 
       appendSlice: ({ date, taskId, projectId, seconds }) =>
         Effect.gen(function* () {
-          const creds = yield* CurrentClockinCredentials
+          if (taskId === TaskId.PROJECT && projectId == null) {
+            return yield* new InvalidCorrectionPlanError({
+              reason: "a project slice needs a project_id",
+            })
+          }
+          if (!Number.isFinite(seconds) || seconds <= 0) {
+            return yield* new InvalidCorrectionPlanError({
+              reason: "the slice needs a positive duration",
+            })
+          }
           const days = yield* api.workdays()
-          const derived = deriveDay(resolveDay(days, date), isoNoMs(new Date()))
-          const slices = [
-            ...derived.slices,
-            { taskId, projectId: projectId ?? null, seconds },
-          ]
-          const events = yield* layTimeline(
-            derived.start ?? new Date(),
-            slices,
-            creds.employeeId,
-          )
-          const result = yield* wipeAndStore(derived.eventIds, events)
-          return yield* finish(result)
+          const derived = deriveDay(resolveDay(days, date), nowIso())
+          const start = derived.endUtc ?? new Date()
+          const span = buildSpan(start, plus(start, seconds), { taskId, projectId })
+          const { transactionId } = yield* api.storeEvent(span)
+          return yield* finish([transactionId])
         }),
     })
   }),

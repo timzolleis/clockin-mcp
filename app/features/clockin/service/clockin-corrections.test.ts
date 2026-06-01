@@ -5,6 +5,7 @@ import {
   ClockinCorrectionsApi,
   CorrectionStored,
   CorrectionUpdated,
+  type CorrectionActivity,
 } from "../api"
 import { CurrentClockinCredentials } from "../client"
 import { ClockinCorrections, ClockinCorrectionsLayer } from "./clockin-corrections"
@@ -12,44 +13,44 @@ import { ClockinWorkdays } from "./clockin-workdays"
 import { TaskId } from "./clockin-tasks"
 import { ClockinCredentials } from "~/lib/domain/credentials"
 import { EmployeeId } from "~/lib/domain/employee"
-import { EventId, TransactionId, type EventInput } from "~/lib/domain/event"
+import { EventId, TransactionId } from "~/lib/domain/event"
 import { ProjectId } from "~/lib/domain/project"
 import { SliceId, type Workday } from "~/lib/domain/workday"
 
 // ---------------------------------------------------------------------------
-// Test harness — an in-memory ClockinCorrectionsApi that records every wipe and
-// store, plus a no-op ClockinWorkdays for the best-effort read-back.
+// In-memory ClockinCorrectionsApi — records every span stored/updated/deleted.
 // ---------------------------------------------------------------------------
 
 const makeMemoryApi = (workdays: readonly Workday[]) => {
-  const stored: EventInput[] = []
-  const deleted: EventId[] = []
+  const stored: CorrectionActivity[] = []
+  const updated: Array<{ id: number; activity: CorrectionActivity }> = []
+  const deleted: number[] = []
   const layer = Layer.succeed(
     ClockinCorrectionsApi,
     ClockinCorrectionsApi.of({
       workdays: () => Effect.succeed(workdays),
-      storeEvent: (event) =>
+      storeEvent: (activity) =>
         Effect.sync(() => {
-          stored.push(event)
+          stored.push(activity)
           return new CorrectionStored({
-            transactionId: TransactionId.make(`tx-${stored.length}`),
-            eventUuid: event.uuid,
+            transactionId: TransactionId.make(1000 + stored.length),
+            eventUuid: "uuid",
           })
         }),
-      deleteEvent: (id) => Effect.sync(() => void deleted.push(id)),
-      updateEvent: () =>
-        Effect.sync(
-          () =>
-            new CorrectionUpdated({
-              transactionId: TransactionId.make("unused"),
-              firstInstanceToRefresh: null,
-              lastInstanceToRefresh: null,
-            }),
-        ),
+      updateEvent: (id, activity) =>
+        Effect.sync(() => {
+          updated.push({ id: Number(id), activity })
+          return new CorrectionUpdated({
+            transactionId: TransactionId.make(2000 + updated.length),
+            firstInstanceToRefresh: null,
+            lastInstanceToRefresh: null,
+          })
+        }),
+      deleteEvent: (id) => Effect.sync(() => void deleted.push(Number(id))),
       undo: () => Effect.void,
     }),
   )
-  return { layer, stored, deleted }
+  return { layer, stored, updated, deleted }
 }
 
 const MemoryWorkdays = Layer.succeed(
@@ -63,10 +64,9 @@ const CREDS = new ClockinCredentials({
   deviceToken: Redacted.make("d"),
 })
 
-/** Run `body` with the service wired over `mem` + creds. */
 const withService = (
   mem: ReturnType<typeof makeMemoryApi>,
-  body: (corrections: typeof ClockinCorrections.Service) => Effect.Effect<unknown, unknown, CurrentClockinCredentials>,
+  body: (c: typeof ClockinCorrections.Service) => Effect.Effect<unknown, unknown, CurrentClockinCredentials>,
 ) =>
   ClockinCorrections.pipe(
     Effect.flatMap(body),
@@ -74,14 +74,11 @@ const withService = (
     Effect.provide(ClockinCorrectionsLayer.pipe(Layer.provide(mem.layer), Layer.provide(MemoryWorkdays))),
   )
 
-/** Seconds each stored slice occupies (gaps between consecutive events). */
-const durations = (events: readonly EventInput[]): number[] => {
-  const out: number[] = []
-  for (let i = 0; i < events.length - 1; i++) {
-    out.push((Date.parse(events[i + 1]!.occured_at) - Date.parse(events[i]!.occured_at)) / 1000)
-  }
-  return out
-}
+// Duration of an activity span in seconds — offset cancels since we read both
+// ends in the same (UTC) frame, so it's correct regardless of the local zone.
+const spanSeconds = (a: CorrectionActivity): number =>
+  (Date.parse(`${a.end_date}T${a.end_time}:00Z`) - Date.parse(`${a.start_date}T${a.start_time}:00Z`)) /
+  1000
 
 const ev = (id: number, occured_at: string, task_id: number, project_id?: number) => ({
   id,
@@ -90,7 +87,7 @@ const ev = (id: number, occured_at: string, task_id: number, project_id?: number
   ...(project_id != null ? { project_id } : {}),
 })
 
-// WORK 09–11 (2h), BREAK 11–12 (1h), WORK 12–15 (3h), clock-out 15:00.
+// WORK 09–11 (2h), BREAK 11–12 (1h), WORK 12–15 (3h), clock-out 15:00. Worked 5h.
 const DAY_WITH_BREAK: Workday = {
   date: "2026-06-01",
   events: [
@@ -112,7 +109,7 @@ const DAY_PROJECT: Workday = {
 }
 
 describe("ClockinCorrections", () => {
-  it.effect("restructureDay redistributes only worked time and drops breaks", () => {
+  it.effect("restructureDay wipes the day and stores one span per bucket of worked time", () => {
     const mem = makeMemoryApi([DAY_WITH_BREAK])
     return withService(mem, (c) =>
       c.restructureDay({
@@ -123,41 +120,45 @@ describe("ClockinCorrections", () => {
       }),
     ).pipe(
       Effect.map(() => {
-        assert.deepStrictEqual(mem.deleted.map(Number), [1, 2, 3, 4]) // every event wiped
+        assert.deepStrictEqual(mem.deleted, [1, 2, 3, 4]) // whole day wiped
         assert.deepStrictEqual(
-          mem.stored.map((e) => [e.task_id, e.project_id]),
+          mem.stored.map((a) => [a.task_id, a.project_id, spanSeconds(a)]),
           [
-            [TaskId.PROJECT, 1],
-            [TaskId.PROJECT, 2],
-            [TaskId.CLOCKOUT, null],
+            [TaskId.PROJECT, 1, 9000], // 5h worked, split 50/50, breaks dropped
+            [TaskId.PROJECT, 2, 9000],
           ],
         )
-        // worked total = 2h + 3h = 5h (break excluded), split 50/50
-        assert.deepStrictEqual(durations(mem.stored), [9000, 9000])
+        assert.strictEqual(mem.updated.length, 0)
       }),
     )
   })
 
-  it.effect("editSlice 'set' resizes one slice and ripples the clock-out", () => {
+  it.effect("editSlice 'set' resizes one slice via a single updateEvent — no wipe", () => {
     const mem = makeMemoryApi([DAY_PROJECT])
     return withService(mem, (c) =>
-      c.editSlice({
-        sliceId: SliceId.make("2026-06-01T11:00:00Z"), // the PROJECT#7 slice
-        op: "set",
-        seconds: 3600, // 3h → 1h
-      }),
+      c.editSlice({ sliceId: SliceId.make("2026-06-01T11:00:00Z"), op: "set", seconds: 3600 }),
     ).pipe(
       Effect.map(() => {
-        assert.deepStrictEqual(mem.deleted.map(Number), [1, 2, 3])
+        assert.strictEqual(mem.deleted.length, 0)
+        assert.strictEqual(mem.stored.length, 0)
+        assert.strictEqual(mem.updated.length, 1)
+        const { id, activity } = mem.updated[0]!
+        assert.strictEqual(id, 2) // PROJECT#7's opening event
         assert.deepStrictEqual(
-          mem.stored.map((e) => [e.task_id, e.project_id]),
-          [
-            [TaskId.WORK, null],
-            [TaskId.PROJECT, 7],
-            [TaskId.CLOCKOUT, null],
-          ],
+          [activity.task_id, activity.project_id, spanSeconds(activity)],
+          [TaskId.PROJECT, 7, 3600], // 3h → 1h
         )
-        assert.deepStrictEqual(durations(mem.stored), [7200, 3600]) // day shrank 3h→1h
+      }),
+    )
+  })
+
+  it.effect("editSlice 'add' grows the slice by the delta", () => {
+    const mem = makeMemoryApi([DAY_PROJECT])
+    return withService(mem, (c) =>
+      c.editSlice({ sliceId: SliceId.make("2026-06-01T11:00:00Z"), op: "add", seconds: 1200 }),
+    ).pipe(
+      Effect.map(() => {
+        assert.strictEqual(spanSeconds(mem.updated[0]!.activity), 10800 + 1200) // 3h + 20m
       }),
     )
   })
@@ -172,26 +173,22 @@ describe("ClockinCorrections", () => {
     )
   })
 
-  it.effect("appendSlice adds a trailing slice and extends the day", () => {
+  it.effect("appendSlice stores one span at the end of the day", () => {
     const mem = makeMemoryApi([DAY_PROJECT])
     return withService(mem, (c) =>
-      c.appendSlice({
-        taskId: TaskId.PROJECT,
-        projectId: ProjectId.make(9),
-        seconds: 2100, // 35 min
-      }),
+      c.appendSlice({ taskId: TaskId.PROJECT, projectId: ProjectId.make(9), seconds: 2100 }),
     ).pipe(
       Effect.map(() => {
+        assert.strictEqual(mem.deleted.length, 0)
+        assert.strictEqual(mem.updated.length, 0)
+        assert.strictEqual(mem.stored.length, 1)
+        const a = mem.stored[0]!
         assert.deepStrictEqual(
-          mem.stored.map((e) => [e.task_id, e.project_id]),
-          [
-            [TaskId.WORK, null],
-            [TaskId.PROJECT, 7],
-            [TaskId.PROJECT, 9],
-            [TaskId.CLOCKOUT, null],
-          ],
+          [a.task_id, a.project_id, spanSeconds(a)],
+          [TaskId.PROJECT, 9, 2100], // 35m appended after the 14:00 clock-out
         )
-        assert.deepStrictEqual(durations(mem.stored), [7200, 10800, 2100]) // existing kept, +35m
+        // starts at the day's end (14:00Z → 16:00 CEST)
+        assert.strictEqual(a.start_time, "16:00")
       }),
     )
   })

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
 
-export const TransactionId = Schema.String.pipe(Schema.brand("TransactionId"))
+// The upstream `/correction` responses return `transactionId` as a number.
+export const TransactionId = Schema.Number.pipe(Schema.brand("TransactionId"))
 export type TransactionId = typeof TransactionId.Type
