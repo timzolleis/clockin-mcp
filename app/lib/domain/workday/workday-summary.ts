@@ -1,12 +1,16 @@
 import { Schema } from "effect"
 import { ProjectRef } from "~/lib/domain/project"
 import { WorkState } from "~/lib/domain/task"
+import { SliceId } from "./slice-id"
 
 // LLM-friendly per-day rollups derived from a /workdays payload.
 
 export class WorkdaySegment extends Schema.Class<WorkdaySegment>(
   "WorkdaySegment",
 )({
+  // Opaque handle (opening event's occured_at) so a correction can target this
+  // exact slice — e.g. which of two "elternportal" segments to resize.
+  id: SliceId,
   type: WorkState,
   project: Schema.NullOr(ProjectRef),
   startedAt: Schema.String,

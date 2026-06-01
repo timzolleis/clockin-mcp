@@ -9,6 +9,8 @@
     "deploy": "pnpm build && wrangler deploy",
     "cf-typegen": "wrangler types ./worker-configuration.d.ts",
     "typecheck": "react-router typegen && tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "db:generate": "drizzle-kit generate --config db/drizzle.config.ts",
     "db:migrate:local": "wrangler d1 migrations apply clockin-mcp --local",
@@ -52,6 +54,7 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.39.0",
     "@cloudflare/workers-types": "^4.20260528.1",
+    "@effect/vitest": "^0.29.0",
     "@react-router/dev": "7.13.1",
     "@tailwindcss/vite": "^4.2.1",
     "@types/node": "^22",
@@ -65,6 +68,7 @@
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^4.1.8",
     "wrangler": "^4.95.0"
   },
   "pnpm": {

@@ -6,8 +6,11 @@ import {
   FolderKanban,
   ListChecks,
   LogOut,
+  Pencil,
   Play,
+  Plus,
   RotateCcw,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react"
 
@@ -27,6 +30,9 @@ export type ToolTag =
   | "list_projects"
   | "list_workdays"
   | "time_overview"
+  | "restructure_workday"
+  | "adjust_slice"
+  | "append_slice"
 
 export interface Tool {
   tag: ToolTag
@@ -81,6 +87,24 @@ export const TOOLS: Tool[] = [
     Icon: BarChart3,
     blurb: "Week / month worked vs. target, flextime, and vacation balance.",
     args: "",
+  },
+  {
+    tag: "restructure_workday",
+    Icon: SlidersHorizontal,
+    blurb: "Re-split a day's worked time across projects by percentage.",
+    args: "buckets[]",
+  },
+  {
+    tag: "adjust_slice",
+    Icon: Pencil,
+    blurb: "Resize one time slice — set it or grow it; the day ripples to match.",
+    args: "slice_id, op",
+  },
+  {
+    tag: "append_slice",
+    Icon: Plus,
+    blurb: "Add a slice at the end of a day, extending it.",
+    args: "task, hours?",
   },
 ]
 
@@ -230,6 +254,37 @@ export const EXAMPLES: Record<ToolTag, Example> = {
         { k: "This month", v: "96h / 152h" },
         { k: "Vacation left", v: "18 days" },
       ],
+    },
+  },
+  restructure_workday: {
+    prompt: "Split today 50/50 between Acme and Globex.",
+    reply: "Done — kept your hours the same and redistributed them.",
+    card: {
+      kind: "confirm",
+      tone: "good",
+      title: "Day restructured",
+      detail:
+        '<b class="text-ink">7h 30m</b> split <b class="text-ink">50/50</b> across Acme and Globex.',
+    },
+  },
+  adjust_slice: {
+    prompt: "Make that Acme block just an hour.",
+    reply: "Updated — the rest of your day shifted to match.",
+    card: {
+      kind: "confirm",
+      tone: "good",
+      title: "Slice updated",
+      detail: 'Acme is now <b class="text-ink">1h</b>; clock-out moved earlier.',
+    },
+  },
+  append_slice: {
+    prompt: "I finished with 35 mins on Internal Ops.",
+    reply: "Added it to the end of your day.",
+    card: {
+      kind: "confirm",
+      tone: "good",
+      title: "Slice added",
+      detail: '<b class="text-ink">35m</b> on Internal · clock-out now 17:35.',
     },
   },
 }

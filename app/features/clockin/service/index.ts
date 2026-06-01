@@ -6,5 +6,6 @@ export * from "./clockin-events";
 export * from "./clockin-projects";
 export * from "./clockin-status";
 export * from "./clockin-workdays";
+export * from "./clockin-corrections";
 export * from "./clockin-timesheets";
 export * from "./clockin-summary";

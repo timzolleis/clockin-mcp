@@ -7,6 +7,7 @@ import type { EventRead } from "~/lib/domain/event";
 import { ProjectRef } from "~/lib/domain/project";
 import {
   ProjectTotal,
+  SliceId,
   Workday,
   WorkdaySegment,
   WorkdaySummary,
@@ -88,6 +89,7 @@ const buildSummary = (
 
     segments.push(
       WorkdaySegment.make({
+        id: SliceId.make(start),
         type,
         project,
         startedAt: start,

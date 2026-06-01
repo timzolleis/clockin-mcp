@@ -12,6 +12,7 @@ import { ClockinCredentialsService } from "~/features/clockin/credentials/creden
 import { ServicesLive } from "~/features/clockin/router/request-services.server"
 import { CurrentClockinCredentials } from "~/features/clockin/client"
 import {
+  ClockinCorrections,
   ClockinEvents,
   ClockinProjects,
   ClockinStatus,
@@ -21,9 +22,12 @@ import {
   formatDuration,
   projectsPhrase,
   summarizeDay,
+  TaskId,
 } from "~/features/clockin/service"
 import { CredentialsNotFoundError, UserId } from "~/lib/domain/credentials"
 import { ProjectDateId, ProjectId } from "~/lib/domain/project"
+import { SliceId } from "~/lib/domain/workday"
+import type { ClockableTaskId } from "~/lib/domain/task"
 import { cloudflareEnvLayer } from "~/lib/effect/cloudflare-env"
 import { DatabaseLive } from "~/lib/effect/db"
 import {
@@ -75,6 +79,22 @@ const errorText = (err: unknown) => ({
 const NOT_CONFIGURED = text(
   "No Clockin credentials configured. Visit /settings to connect your account.",
 )
+
+// The task vocabulary the correction tools expose, mapped to upstream task ids.
+const TASK_BY_NAME = {
+  work: TaskId.WORK,
+  project: TaskId.PROJECT,
+  break: TaskId.BREAK,
+  drive: TaskId.DRIVE,
+  load: TaskId.LOAD,
+  duty: TaskId.DUTY,
+} as const satisfies Record<string, ClockableTaskId>
+
+const TASK_NAMES = ["work", "project", "break", "drive", "load", "duty"] as const
+
+/** Fold the human duration inputs into seconds. */
+const toSeconds = (hours?: number, minutes?: number) =>
+  Math.round((hours ?? 0) * 3600 + (minutes ?? 0) * 60)
 
 // ---------------------------------------------------------------------------
 // transformErrors — the single, total error→text boundary
@@ -417,6 +437,162 @@ const registerTools = (runtime: ToolRuntime) =>
         _meta: { ui: { resourceUri: timeOverviewWidget.uri } },
       },
       () => run(Effect.flatMap(ClockinTimesheets, (t) => t.overview())),
+    )
+
+    registerAppTool(
+      server,
+      "restructure_workday",
+      {
+        description:
+          "Re-split a day's WORKED time across projects by percentage — e.g. " +
+          "'make today 20% A, 30% B, 50% C'. The server keeps the day's total " +
+          "worked time fixed and redistributes it into the buckets (length " +
+          "unchanged; breaks are not carried over). Each bucket: { task " +
+          "(default 'project'), project_id (required for 'project'), percent }. " +
+          "Use list_projects for ids. Returns { message, today, transactionIds, " +
+          "display } — speak `message` back.",
+        inputSchema: {
+          date: z.string().optional(),
+          buckets: z
+            .array(
+              z.object({
+                task: z.enum(TASK_NAMES).default("project"),
+                project_id: z.number().int().positive().optional(),
+                percent: z.number().positive(),
+              }),
+            )
+            .min(1),
+        },
+        _meta: { ui: { resourceUri: confirmWidget.uri } },
+      },
+      ({ date, buckets }) =>
+        run(
+          Effect.gen(function* () {
+            const corrections = yield* ClockinCorrections
+            const at = new Date().toISOString()
+            const result = yield* corrections.restructureDay({
+              date,
+              buckets: buckets.map((b) => ({
+                taskId: TASK_BY_NAME[b.task],
+                projectId: b.project_id != null ? ProjectId.make(b.project_id) : null,
+                weight: b.percent,
+              })),
+            })
+            const day = result.day
+            const message = day
+              ? `Restructured your day — ${day.worked} logged${projectsPhrase(day.projectCount)}.`
+              : "Day restructured."
+            return {
+              message,
+              today: day,
+              transactionIds: result.transactionIds,
+              display: {
+                tone: "good",
+                title: "Day restructured",
+                at,
+                detail: day ? `${day.worked} across ${day.projectCount} projects.` : "",
+              },
+            }
+          }),
+        ),
+    )
+
+    registerAppTool(
+      server,
+      "adjust_slice",
+      {
+        description:
+          "Resize one existing time slice. Get the slice's `id` from " +
+          "list_workdays (each segment carries one). `op: 'set'` makes it that " +
+          "length; `op: 'add'` grows it by the amount. The rest of the day " +
+          "ripples — e.g. 'set' elternportal to 1h moves the clock-out earlier. " +
+          "Pass `hours` and/or `minutes`. Returns { message, today, " +
+          "transactionIds, display } — speak `message` back.",
+        inputSchema: {
+          slice_id: z.string(),
+          op: z.enum(["set", "add"]).default("set"),
+          hours: z.number().nonnegative().optional(),
+          minutes: z.number().nonnegative().optional(),
+        },
+        _meta: { ui: { resourceUri: confirmWidget.uri } },
+      },
+      ({ slice_id, op, hours, minutes }) =>
+        run(
+          Effect.gen(function* () {
+            const corrections = yield* ClockinCorrections
+            const at = new Date().toISOString()
+            const seconds = toSeconds(hours, minutes)
+            const result = yield* corrections.editSlice({
+              sliceId: SliceId.make(slice_id),
+              op,
+              seconds,
+            })
+            const day = result.day
+            const message =
+              op === "set"
+                ? `Set that slice to ${formatDuration(seconds)}.`
+                : `Added ${formatDuration(seconds)} to that slice.`
+            return {
+              message,
+              today: day,
+              transactionIds: result.transactionIds,
+              display: {
+                tone: "good",
+                title: op === "set" ? "Slice updated" : "Slice extended",
+                at,
+                detail: day ? `${day.worked} logged today.` : "",
+              },
+            }
+          }),
+        ),
+    )
+
+    registerAppTool(
+      server,
+      "append_slice",
+      {
+        description:
+          "Add a new slice at the END of a day, extending it — e.g. 'I " +
+          "finished with 35 mins of elternportal'. Fields: { date?, task " +
+          "(default 'project'), project_id (required for 'project'), hours?, " +
+          "minutes? }. Use list_projects for ids. Returns { message, today, " +
+          "transactionIds, display } — speak `message` back.",
+        inputSchema: {
+          date: z.string().optional(),
+          task: z.enum(TASK_NAMES).default("project"),
+          project_id: z.number().int().positive().optional(),
+          hours: z.number().nonnegative().optional(),
+          minutes: z.number().nonnegative().optional(),
+        },
+        _meta: { ui: { resourceUri: confirmWidget.uri } },
+      },
+      ({ date, task, project_id, hours, minutes }) =>
+        run(
+          Effect.gen(function* () {
+            const corrections = yield* ClockinCorrections
+            const at = new Date().toISOString()
+            const seconds = toSeconds(hours, minutes)
+            const result = yield* corrections.appendSlice({
+              date,
+              taskId: TASK_BY_NAME[task],
+              projectId: project_id != null ? ProjectId.make(project_id) : null,
+              seconds,
+            })
+            const day = result.day
+            const message = `Added ${formatDuration(seconds)} to the end of your day.`
+            return {
+              message,
+              today: day,
+              transactionIds: result.transactionIds,
+              display: {
+                tone: "good",
+                title: "Slice added",
+                at,
+                detail: day ? `${day.worked} logged today.` : "",
+              },
+            }
+          }),
+        ),
     )
   })
 

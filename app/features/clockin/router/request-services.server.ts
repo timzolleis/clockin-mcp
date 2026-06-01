@@ -6,6 +6,7 @@ import {
   ClockinEmployeeApiLive,
 } from "~/features/clockin/api"
 import {
+  ClockinCorrectionsLive,
   ClockinEventsLive,
   ClockinProjectsLive,
   ClockinStatusLive,
@@ -28,6 +29,7 @@ export const ServicesLive = Layer.mergeAll(
   ClockinEmployeeApiLive,
   ClockinCorrectionsApiLive,
   // Business services — each bundles its own *Api dependencies via Layer.provide.
+  ClockinCorrectionsLive,
   ClockinEventsLive,
   ClockinProjectsLive,
   ClockinStatusLive,
