@@ -20,7 +20,8 @@ export type EventInput = Schema.Schema.Type<typeof EventInput>
 
 // Event as returned by /workdays nested events.
 export const EventRead = Schema.Struct({
-  uuid: Schema.optional(Schema.String),
+  // Upstream sends `uuid: null` on corrected/backfilled events — allow it.
+  uuid: Schema.optional(Schema.NullOr(Schema.String)),
   id: Schema.optional(Schema.Union(Schema.Number, Schema.String)),
   occured_at: Schema.String,
   task_id: AnyTaskId,
