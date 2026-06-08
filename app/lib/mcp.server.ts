@@ -24,9 +24,10 @@ import {
   summarizeDay,
   TaskId,
 } from "~/features/clockin/service"
+import { DEFAULT_TIME_ZONE, parseAt, validateAt } from "~/features/clockin/service/correction-plan"
 import { CredentialsNotFoundError, UserId } from "~/lib/domain/credentials"
 import { ProjectDateId, ProjectId } from "~/lib/domain/project"
-import { SliceId } from "~/lib/domain/workday"
+import { InvalidCorrectionPlanError, SliceId } from "~/lib/domain/workday"
 import type { ClockableTaskId } from "~/lib/domain/task"
 import { cloudflareEnvLayer } from "~/lib/effect/cloudflare-env"
 import { DatabaseLive } from "~/lib/effect/db"
@@ -95,6 +96,67 @@ const TASK_NAMES = ["work", "project", "break", "drive", "load", "duty"] as cons
 /** Fold the human duration inputs into seconds. */
 const toSeconds = (hours?: number, minutes?: number) =>
   Math.round((hours ?? 0) * 3600 + (minutes ?? 0) * 60)
+
+// The `at` parameter shared by the start/stop tools. Bare `HH:mm` (employee
+// zone, today) or a full ISO instant; omitted ⇒ now. Parsing rides the typed
+// error channel (InvalidCorrectionPlanError) so a bad time reads back as a
+// clear message rather than a thrown defect.
+const AT_INPUT = z
+  .string()
+  .describe(
+    "Optional time the action happened, e.g. '08:40' (HH:mm, today, employee timezone) or a full ISO 8601 timestamp. Defaults to now. Use it to backdate — 'clock me in at 08:40'.",
+  )
+  .optional()
+
+/**
+ * Resolve the optional `at` input to a UTC instant, defaulting to now. When
+ * backdating, validate against `notBefore` (the latest recorded entry, ISO) so
+ * the event can't land in the future or behind the timeline head. Failures ride
+ * the InvalidCorrectionPlanError channel for {@link onInvalidAt} to render.
+ */
+const resolveAt = (at: string | undefined, notBefore?: string | null) =>
+  Effect.gen(function* () {
+    const now = new Date()
+    if (at == null) return now
+    const when = yield* parseAt(at, now, DEFAULT_TIME_ZONE)
+    const floor = notBefore != null ? new Date(notBefore) : null
+    return yield* validateAt(when, now, floor, DEFAULT_TIME_ZONE)
+  })
+
+/** Latest recorded entry's instant (ISO) or null — best-effort, for `resolveAt`. */
+const lastEntryAt = ClockinStatus.pipe(
+  Effect.flatMap((s) => s.current()),
+  Effect.map((s) => s.since),
+  Effect.catchAll(() => Effect.succeed<string | null>(null)),
+)
+
+// Turn an InvalidCorrectionPlanError into a display-shaped result the model
+// speaks back (tone "error"), instead of a raw thrown error. `title` heads the
+// card. Scoped to the time tools, whose InvalidCorrectionPlanError comes only
+// from parsing/validating user-supplied times.
+const onInvalid =
+  (title: string) =>
+  <A, E, R>(self: Effect.Effect<A, E, R>) =>
+    Effect.catchIf(
+      self,
+      (e): e is E & InvalidCorrectionPlanError => e instanceof InvalidCorrectionPlanError,
+      (e) =>
+        Effect.succeed({
+          message: e.reason,
+          display: { tone: "error" as const, title, detail: e.reason },
+        }),
+    )
+
+// Backdating failures on the start/stop tools.
+const onInvalidAt = onInvalid("Couldn't set that time")
+
+/** Parse an explicit boundary time (edit_segment) — `HH:mm`/ISO, not in the future. */
+const parseBoundary = (input: string) =>
+  Effect.gen(function* () {
+    const now = new Date()
+    const when = yield* parseAt(input, now, DEFAULT_TIME_ZONE)
+    return yield* validateAt(when, now, null, DEFAULT_TIME_ZONE)
+  })
 
 // ---------------------------------------------------------------------------
 // transformErrors — the single, total error→text boundary
@@ -196,16 +258,18 @@ const registerTools = (runtime: ToolRuntime) =>
       "clock_in",
       {
         description:
-          "Start the workday — clock in. Returns { message, clockedInAt (ISO), today, display }. `message` is a ready confirmation; `today` carries the day's totals so far. Speak `message` back to the user.",
-        inputSchema: {},
+          "Start the workday — clock in. Pass `at` to backdate (e.g. '08:40'); omit for now. Returns { message, clockedInAt (ISO), today, display }. `message` is a ready confirmation; `today` carries the day's totals so far. Speak `message` back to the user.",
+        inputSchema: { at: AT_INPUT },
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
-      () =>
+      ({ at: atInput }) =>
         run(
           Effect.gen(function* () {
             const events = yield* ClockinEvents
-            const at = new Date().toISOString()
-            yield* events.clockIn()
+            const since = atInput != null ? yield* lastEntryAt : null
+            const when = yield* resolveAt(atInput, since)
+            const at = when.toISOString()
+            yield* events.clockIn(when)
             const day = yield* today
             const resumed = day != null && day.workedSeconds > 0
             const message = resumed
@@ -220,7 +284,7 @@ const registerTools = (runtime: ToolRuntime) =>
               today: day,
               display: { tone: "good", title: "Clocked in", at, detail },
             }
-          }),
+          }).pipe(onInvalidAt),
         ),
     )
 
@@ -229,16 +293,18 @@ const registerTools = (runtime: ToolRuntime) =>
       "clock_out",
       {
         description:
-          "End the workday — clock out. Returns { message, clockedOutAt (ISO), today: { worked, workedSeconds, onBreak, clockedIn, projects[], projectCount }, display }. `message` already reads e.g. 'Clocked out — 7h 48m logged today across 2 projects.' — speak it back.",
-        inputSchema: {},
+          "End the workday — clock out. Pass `at` to backdate (e.g. '17:30'); omit for now. Returns { message, clockedOutAt (ISO), today: { worked, workedSeconds, onBreak, clockedIn, projects[], projectCount }, display }. `message` already reads e.g. 'Clocked out — 7h 48m logged today across 2 projects.' — speak it back.",
+        inputSchema: { at: AT_INPUT },
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
-      () =>
+      ({ at: atInput }) =>
         run(
           Effect.gen(function* () {
             const events = yield* ClockinEvents
-            const at = new Date().toISOString()
-            yield* events.clockOut()
+            const since = atInput != null ? yield* lastEntryAt : null
+            const when = yield* resolveAt(atInput, since)
+            const at = when.toISOString()
+            yield* events.clockOut(when)
             const day = yield* today
             const logged = day != null && day.workedSeconds > 0
             const phrase = day ? projectsPhrase(day.projectCount) : ""
@@ -254,7 +320,7 @@ const registerTools = (runtime: ToolRuntime) =>
               today: day,
               display: { tone: "good", title: "Clocked out", at, detail },
             }
-          }),
+          }).pipe(onInvalidAt),
         ),
     )
 
@@ -263,16 +329,18 @@ const registerTools = (runtime: ToolRuntime) =>
       "start_break",
       {
         description:
-          "Begin a break. Time stops counting as work. Returns { message, breakStartedAt (ISO), today, display }. Speak `message` back.",
-        inputSchema: {},
+          "Begin a break. Time stops counting as work. Pass `at` to backdate (e.g. '12:00'); omit for now. Returns { message, breakStartedAt (ISO), today, display }. Speak `message` back.",
+        inputSchema: { at: AT_INPUT },
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
-      () =>
+      ({ at: atInput }) =>
         run(
           Effect.gen(function* () {
             const events = yield* ClockinEvents
-            const at = new Date().toISOString()
-            yield* events.startBreak()
+            const since = atInput != null ? yield* lastEntryAt : null
+            const when = yield* resolveAt(atInput, since)
+            const at = when.toISOString()
+            yield* events.startBreak(when)
             const day = yield* today
             const logged = day != null && day.workedSeconds > 0
             const message = logged
@@ -287,7 +355,7 @@ const registerTools = (runtime: ToolRuntime) =>
               today: day,
               display: { tone: "iris", title: "Break started", at, detail },
             }
-          }),
+          }).pipe(onInvalidAt),
         ),
     )
 
@@ -296,11 +364,11 @@ const registerTools = (runtime: ToolRuntime) =>
       "resume_work",
       {
         description:
-          "Return from a break (or any non-work task) to general work time. Returns { message, resumedAt (ISO), away: { duration, seconds, since } | null, today, display }. When you were on a break, `message` reads e.g. 'Back to work — you were away for 42m.' — speak it back.",
-        inputSchema: {},
+          "Return from a break (or any non-work task) to general work time. Pass `at` to backdate (e.g. '12:30'); omit for now. Returns { message, resumedAt (ISO), away: { duration, seconds, since } | null, today, display }. When you were on a break, `message` reads e.g. 'Back to work — you were away for 42m.' — speak it back.",
+        inputSchema: { at: AT_INPUT },
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
-      () =>
+      ({ at: atInput }) =>
         run(
           Effect.gen(function* () {
             const status = yield* ClockinStatus
@@ -310,8 +378,9 @@ const registerTools = (runtime: ToolRuntime) =>
             const before = yield* status
               .current()
               .pipe(Effect.catchAll(() => Effect.succeed(null)))
-            const at = new Date().toISOString()
-            yield* events.resumeWork()
+            const when = yield* resolveAt(atInput, before?.since)
+            const at = when.toISOString()
+            yield* events.resumeWork(when)
             const day = yield* today
             const away =
               before != null && before.state === "on_break"
@@ -334,7 +403,7 @@ const registerTools = (runtime: ToolRuntime) =>
               today: day,
               display: { tone: "good", title: "Back to work", at, detail },
             }
-          }),
+          }).pipe(onInvalidAt),
         ),
     )
 
@@ -346,15 +415,17 @@ const registerTools = (runtime: ToolRuntime) =>
           "Start working on a specific project. Clocks in first if you're " +
           "clocked out, then attaches the project; if you're already clocked " +
           "in it just switches to the project. Use `list_projects` first to " +
-          "find the project_id. Returns { message, project: { id, name }, " +
+          "find the project_id. Pass `at` to backdate the start (e.g. '08:40'); " +
+          "omit for now. Returns { message, project: { id, name }, " +
           "startedAt (ISO), today, display } — speak `message` back.",
         inputSchema: {
           project_id: z.number().int().positive(),
           project_date_id: z.number().int().positive().optional(),
+          at: AT_INPUT,
         },
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
-      ({ project_id, project_date_id }) =>
+      ({ project_id, project_date_id, at: atInput }) =>
         run(
           Effect.gen(function* () {
             const status = yield* ClockinStatus
@@ -366,11 +437,12 @@ const registerTools = (runtime: ToolRuntime) =>
               project_date_id != null
                 ? ProjectDateId.make(project_date_id)
                 : undefined
-            const at = new Date().toISOString()
+            const when = yield* resolveAt(atInput, current.since)
+            const at = when.toISOString()
             if (wasClockedOut) {
-              yield* events.clockInAndSwitchToProject(projectId, projectDateId)
+              yield* events.clockInAndSwitchToProject(projectId, projectDateId, when)
             } else {
-              yield* events.switchToProject(projectId, projectDateId)
+              yield* events.switchToProject(projectId, projectDateId, when)
             }
             const day = yield* today
             const name =
@@ -394,7 +466,7 @@ const registerTools = (runtime: ToolRuntime) =>
                 detail,
               },
             }
-          }),
+          }).pipe(onInvalidAt),
         ),
     )
 
@@ -502,12 +574,14 @@ const registerTools = (runtime: ToolRuntime) =>
       "adjust_slice",
       {
         description:
-          "Resize one existing time slice. Get the slice's `id` from " +
+          "Resize one existing time slice by DURATION. Get the slice's `id` from " +
           "list_workdays (each segment carries one). `op: 'set'` makes it that " +
-          "length; `op: 'add'` grows it by the amount. The rest of the day " +
-          "ripples — e.g. 'set' elternportal to 1h moves the clock-out earlier. " +
-          "Pass `hours` and/or `minutes`. Returns { message, today, " +
-          "transactionIds, display } — speak `message` back.",
+          "length; `op: 'add'` grows it by the amount. The slice's START is fixed " +
+          "— it grows/shrinks from the end, and the rest of the day ripples (e.g. " +
+          "'set' elternportal to 1h moves the clock-out earlier). It cannot move a " +
+          "slice's start — to backdate a start, set the time when you clock in/start " +
+          "the project via their `at` parameter. Pass `hours` and/or `minutes`. " +
+          "Returns { message, today, transactionIds, display } — speak `message` back.",
         inputSchema: {
           slice_id: z.string(),
           op: z.enum(["set", "add"]).default("set"),
@@ -544,6 +618,65 @@ const registerTools = (runtime: ToolRuntime) =>
               },
             }
           }),
+        ),
+    )
+
+    registerAppTool(
+      server,
+      "edit_segment",
+      {
+        description:
+          "Move a segment's exact START and/or END (absolute boundaries) — the " +
+          "primitive adjust_slice lacks. Get `segment_id` from list_workdays. Pass " +
+          "`started_at` and/or `ended_at` as 'HH:mm' (today, employee timezone) or a " +
+          "full ISO timestamp; omit a side to keep it. Unlike adjust_slice (which " +
+          "resizes by duration with the start anchored), this CAN move a start — use " +
+          "it to backdate a workday's opening (e.g. started_at '08:40'). Neighbors are " +
+          "NOT shifted; the backend rejects a boundary that overlaps another entry. " +
+          "Moving a start changes the segment's id, so re-read list_workdays after. " +
+          "Returns { message, today, transactionIds, display } — speak `message` back.",
+        inputSchema: {
+          segment_id: z.string().describe("The segment's id, from list_workdays."),
+          started_at: z
+            .string()
+            .describe("New start: 'HH:mm' or ISO. Omit to keep the current start.")
+            .optional(),
+          ended_at: z
+            .string()
+            .describe("New end: 'HH:mm' or ISO. Omit to keep the current end.")
+            .optional(),
+        },
+        _meta: { ui: { resourceUri: confirmWidget.uri } },
+      },
+      ({ segment_id, started_at, ended_at }) =>
+        run(
+          Effect.gen(function* () {
+            const corrections = yield* ClockinCorrections
+            const at = new Date().toISOString()
+            const startedAt = started_at != null ? yield* parseBoundary(started_at) : undefined
+            const endedAt = ended_at != null ? yield* parseBoundary(ended_at) : undefined
+            const result = yield* corrections.editSegment({
+              sliceId: SliceId.make(segment_id),
+              startedAt,
+              endedAt,
+            })
+            const day = result.day
+            const moved = [
+              started_at != null ? "start" : null,
+              ended_at != null ? "end" : null,
+            ].filter(Boolean)
+            return {
+              message: `Moved the segment's ${moved.join(" and ")}. Re-read list_workdays for fresh ids.`,
+              today: day,
+              transactionIds: result.transactionIds,
+              display: {
+                tone: "good",
+                title: "Segment updated",
+                at,
+                detail: day ? `${day.worked} logged today.` : "",
+              },
+            }
+          }).pipe(onInvalid("Couldn't edit the segment")),
         ),
     )
 

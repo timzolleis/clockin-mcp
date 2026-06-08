@@ -19,8 +19,8 @@ export const confirmWidget = defineWidget({
   render: `
     function render(d) {
       var c = (d && d.display) ? d.display : (d || {});
-      var tone = c.tone === "iris" ? "iris" : "good";
-      var mark = tone === "iris" ? "\\u275A\\u275A" : "\\u2713";
+      var tone = c.tone === "iris" ? "iris" : (c.tone === "error" ? "error" : "good");
+      var mark = tone === "iris" ? "\\u275A\\u275A" : (tone === "error" ? "\\u2715" : "\\u2713");
       var at = c.at ? " at " + fmtClock(c.at) : "";
       var html = '<div class="confirm">';
       html += '<span class="badge ' + tone + '">' + mark + "</span>";

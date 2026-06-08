@@ -15,18 +15,22 @@ import { TaskId } from "./clockin-tasks";
 // device_token). The transport + error narrowing live in the API layer; this
 // layer owns the payload construction and multi-event orchestration.
 
+// Every intent optionally accepts `occurredAt` — the instant the event happened
+// — so callers can backdate ("clock me in at 08:40"). Omitted ⇒ now (UTC). The
+// instant is rendered ms-stripped UTC by `build`; resolving a user's "08:40"
+// into a UTC `Date` is the tool layer's job (see `parseAt`).
 export interface ClockinEventsService {
   /** Clock in (task_id=10). 400/401/422. */
-  readonly clockIn: () => Effect.Effect<void, EventWriteError, CurrentClockinCredentials>;
+  readonly clockIn: (occurredAt?: Date) => Effect.Effect<void, EventWriteError, CurrentClockinCredentials>;
 
   /** Clock out (task_id=8). 400/401/422. */
-  readonly clockOut: () => Effect.Effect<void, EventWriteError, CurrentClockinCredentials>;
+  readonly clockOut: (occurredAt?: Date) => Effect.Effect<void, EventWriteError, CurrentClockinCredentials>;
 
   /** Start a break (task_id=5). 400/401/422. */
-  readonly startBreak: () => Effect.Effect<void, EventWriteError, CurrentClockinCredentials>;
+  readonly startBreak: (occurredAt?: Date) => Effect.Effect<void, EventWriteError, CurrentClockinCredentials>;
 
   /** Resume work (task_id=10). 400/401/422. */
-  readonly resumeWork: () => Effect.Effect<void, EventWriteError, CurrentClockinCredentials>;
+  readonly resumeWork: (occurredAt?: Date) => Effect.Effect<void, EventWriteError, CurrentClockinCredentials>;
 
   /**
    * Switch to a project (task_id=4, project_id required) — emits a single
@@ -35,17 +39,20 @@ export interface ClockinEventsService {
    */
   readonly switchToProject: (
     projectId: ProjectId,
-    projectDateId?: ProjectDateId
+    projectDateId?: ProjectDateId,
+    occurredAt?: Date
   ) => Effect.Effect<void, EventWriteError, CurrentClockinCredentials>;
 
   /**
    * Open the workday and switch to a project in one atomic batch — emits a WORK
    * event (task_id=10) immediately followed by a PROJECT event (task_id=4) one
-   * second later so it sorts strictly last for status reads. 400/401/422.
+   * second later so it sorts strictly last for status reads. `occurredAt` sets
+   * the WORK event's instant (the PROJECT event follows +1s). 400/401/422.
    */
   readonly clockInAndSwitchToProject: (
     projectId: ProjectId,
-    projectDateId?: ProjectDateId
+    projectDateId?: ProjectDateId,
+    occurredAt?: Date
   ) => Effect.Effect<void, EventWriteError, CurrentClockinCredentials>;
 
   /**
@@ -114,17 +121,17 @@ export const ClockinEventsLive = Layer.effect(
       Effect.flatMap(CurrentClockinCredentials, (creds) => api.storeMany([build(draft, creds.employeeId)]));
 
     return ClockinEvents.of({
-      clockIn: () => one({ taskId: TaskId.WORK }),
-      clockOut: () => one({ taskId: TaskId.CLOCKOUT }),
-      startBreak: () => one({ taskId: TaskId.BREAK }),
-      resumeWork: () => one({ taskId: TaskId.WORK }),
+      clockIn: (occurredAt) => one({ taskId: TaskId.WORK, occurredAt }),
+      clockOut: (occurredAt) => one({ taskId: TaskId.CLOCKOUT, occurredAt }),
+      startBreak: (occurredAt) => one({ taskId: TaskId.BREAK, occurredAt }),
+      resumeWork: (occurredAt) => one({ taskId: TaskId.WORK, occurredAt }),
 
-      switchToProject: (projectId, projectDateId) =>
-        one({ taskId: TaskId.PROJECT, projectId, projectDateId: projectDateId ?? null }),
+      switchToProject: (projectId, projectDateId, occurredAt) =>
+        one({ taskId: TaskId.PROJECT, projectId, projectDateId: projectDateId ?? null, occurredAt }),
 
-      clockInAndSwitchToProject: (projectId, projectDateId) =>
+      clockInAndSwitchToProject: (projectId, projectDateId, occurredAt) =>
         Effect.flatMap(CurrentClockinCredentials, (creds) => {
-          const now = new Date();
+          const now = occurredAt ?? new Date();
           // The PROJECT event must sort strictly AFTER the WORK event: occured_at
           // has ms stripped and status uses a strict `>` tie-break, so bump the
           // project event +1s to guarantee it reads back as the latest.

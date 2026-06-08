@@ -56,7 +56,7 @@ const baseCss = `
     --bg: #0d0e11; --bg2: #15171c; --bg3: #1f2229;
     --line: rgba(255,255,255,0.08); --line2: rgba(255,255,255,0.06);
     --ink: #f3f4f7; --ink2: #c7cad2; --ink3: #9398a3; --ink4: #686d78;
-    --iris: #7c84ff; --iris2: #9aa0ff; --good: #4ade80;
+    --iris: #7c84ff; --iris2: #9aa0ff; --good: #4ade80; --bad: #f87171;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); }
@@ -126,6 +126,7 @@ const baseCss = `
   }
   .badge.good { background: rgba(74,222,128,0.15); color: var(--good); }
   .badge.iris { background: rgba(124,132,255,0.15); color: var(--iris); }
+  .badge.error { background: rgba(248,113,113,0.15); color: var(--bad); }
   .c-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
   .c-detail { margin-top: 2px; font-size: 12.5px; line-height: 1.45; color: var(--ink3); }
 
