@@ -173,6 +173,87 @@ describe("ClockinCorrections", () => {
     )
   })
 
+  it.effect("editSegment moves a start, keeping the end (ripple none) — one updateEvent", () => {
+    const mem = makeMemoryApi([DAY_PROJECT])
+    // Backdate the day's opening: WORK starts 09:00Z (11:00 CEST); pull it to
+    // 06:40Z (08:40 CEST). The end stays at the next event, 11:00Z (13:00 CEST).
+    return withService(mem, (c) =>
+      c.editSegment({
+        sliceId: SliceId.make("2026-06-01T09:00:00Z"),
+        startedAt: new Date("2026-06-01T06:40:00Z"),
+      }),
+    ).pipe(
+      Effect.map(() => {
+        assert.strictEqual(mem.deleted.length, 0)
+        assert.strictEqual(mem.stored.length, 0)
+        assert.strictEqual(mem.updated.length, 1)
+        const { id, activity } = mem.updated[0]!
+        assert.strictEqual(id, 1) // the day's opening event
+        assert.strictEqual(activity.start_time, "08:40") // 06:40Z → 08:40 CEST
+        assert.strictEqual(activity.end_time, "13:00") // kept: 11:00Z → 13:00 CEST
+        assert.strictEqual(spanSeconds(activity), 4 * 3600 + 20 * 60) // 08:40 → 13:00 = 4h20m
+      }),
+    )
+  })
+
+  it.effect("editSegment sets both boundaries when given both", () => {
+    const mem = makeMemoryApi([DAY_PROJECT])
+    return withService(mem, (c) =>
+      c.editSegment({
+        sliceId: SliceId.make("2026-06-01T11:00:00Z"),
+        startedAt: new Date("2026-06-01T11:30:00Z"),
+        endedAt: new Date("2026-06-01T13:30:00Z"),
+      }),
+    ).pipe(
+      Effect.map(() => {
+        const { id, activity } = mem.updated[0]!
+        assert.strictEqual(id, 2)
+        assert.deepStrictEqual([activity.start_time, activity.end_time], ["13:30", "15:30"])
+        assert.strictEqual(spanSeconds(activity), 2 * 3600) // 2h
+      }),
+    )
+  })
+
+  it.effect("editSegment rejects an empty edit (no start, no end)", () => {
+    const mem = makeMemoryApi([DAY_PROJECT])
+    return withService(mem, (c) =>
+      c.editSegment({ sliceId: SliceId.make("2026-06-01T09:00:00Z") }).pipe(
+        Effect.flip,
+        Effect.map((e) => {
+          assert.strictEqual(e._tag, "InvalidCorrectionPlanError")
+          assert.strictEqual(mem.updated.length, 0)
+        }),
+      ),
+    )
+  })
+
+  it.effect("editSegment rejects an end at or before the start", () => {
+    const mem = makeMemoryApi([DAY_PROJECT])
+    return withService(mem, (c) =>
+      c.editSegment({
+        sliceId: SliceId.make("2026-06-01T11:00:00Z"),
+        startedAt: new Date("2026-06-01T12:00:00Z"),
+        endedAt: new Date("2026-06-01T11:00:00Z"),
+      }).pipe(
+        Effect.flip,
+        Effect.map((e) => assert.match((e as { reason: string }).reason, /end after it starts/)),
+      ),
+    )
+  })
+
+  it.effect("editSegment rejects an unknown segment id", () => {
+    const mem = makeMemoryApi([DAY_PROJECT])
+    return withService(mem, (c) =>
+      c.editSegment({
+        sliceId: SliceId.make("nope"),
+        startedAt: new Date("2026-06-01T08:00:00Z"),
+      }).pipe(
+        Effect.flip,
+        Effect.map((e) => assert.strictEqual(e._tag, "SliceNotFoundError")),
+      ),
+    )
+  })
+
   it.effect("appendSlice stores one span at the end of the day", () => {
     const mem = makeMemoryApi([DAY_PROJECT])
     return withService(mem, (c) =>

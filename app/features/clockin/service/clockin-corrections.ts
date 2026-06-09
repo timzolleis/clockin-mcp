@@ -38,7 +38,12 @@ type WriteError = CorrectionWriteError
 // Editing a workday as ACTIVITY SPANS (Clockin's native correction model):
 //   • editSlice   → one updateEvent on the slice's opening event (the adjacent
 //                   activity absorbs the change; the last slice extends/shrinks
-//                   the day). Ids stay stable — no wipe.
+//                   the day). Resizes by DURATION; start stays anchored. Ids
+//                   stay stable — no wipe.
+//   • editSegment → one updateEvent that sets the slice's ABSOLUTE boundaries
+//                   (start and/or end), the only primitive that can move a
+//                   start. Ripple "none": neighbors are untouched, so moving a
+//                   start changes the slice id (re-read after).
 //   • appendSlice → one storeEvent at the day's end.
 //   • restructureDay → delete the day's events, then storeEvent one span per
 //                   bucket from the day's start (conserves the worked total).
@@ -58,6 +63,22 @@ export interface ClockinCorrectionsService {
     sliceId: SliceId
     op: "set" | "add"
     seconds: number
+  }) => Effect.Effect<
+    CorrectionResult,
+    SliceNotFoundError | InvalidCorrectionPlanError | WriteError,
+    CurrentClockinCredentials
+  >
+
+  /**
+   * Set a slice's absolute boundaries — `startedAt` and/or `endedAt`, each
+   * defaulting to its current value. Ripple "none": no neighbor is moved, so the
+   * backend rejects a boundary that overlaps another entry. The one primitive
+   * that can move a start (and thus its slice id).
+   */
+  readonly editSegment: (edit: {
+    sliceId: SliceId
+    startedAt?: Date
+    endedAt?: Date
   }) => Effect.Effect<
     CorrectionResult,
     SliceNotFoundError | InvalidCorrectionPlanError | WriteError,
@@ -198,6 +219,23 @@ export const ClockinCorrectionsLayer = Layer.effect(
     const finish = (transactionIds: ReadonlyArray<TransactionId>) =>
       Effect.map(readBack, (day): CorrectionResult => ({ transactionIds, day }))
 
+    // Resolve a slice id to its derived slice + a guaranteed-present event id —
+    // the shared front of every single-slice edit.
+    const locate = (sliceId: SliceId) =>
+      Effect.gen(function* () {
+        const days = yield* api.workdays()
+        const day = findDayContaining(days, sliceId)
+        if (day == null) return yield* new SliceNotFoundError({ sliceId })
+        const slice = deriveDay(day, nowIso()).slices.find((s) => s.sliceId === sliceId)
+        if (slice == null) return yield* new SliceNotFoundError({ sliceId })
+        if (slice.eventId == null) {
+          return yield* new InvalidCorrectionPlanError({
+            reason: "this slice has no event id and can't be edited",
+          })
+        }
+        return { slice, eventId: slice.eventId }
+      })
+
     return ClockinCorrections.of({
       restructureDay: ({ date, buckets }) =>
         Effect.gen(function* () {
@@ -225,16 +263,7 @@ export const ClockinCorrectionsLayer = Layer.effect(
 
       editSlice: ({ sliceId, op, seconds }) =>
         Effect.gen(function* () {
-          const days = yield* api.workdays()
-          const day = findDayContaining(days, sliceId)
-          if (day == null) return yield* new SliceNotFoundError({ sliceId })
-          const slice = deriveDay(day, nowIso()).slices.find((s) => s.sliceId === sliceId)
-          if (slice == null) return yield* new SliceNotFoundError({ sliceId })
-          if (slice.eventId == null) {
-            return yield* new InvalidCorrectionPlanError({
-              reason: "this slice has no event id and can't be edited",
-            })
-          }
+          const { slice, eventId } = yield* locate(sliceId)
           const newSeconds = op === "set" ? seconds : slice.seconds + seconds
           if (!Number.isFinite(newSeconds) || newSeconds <= 0) {
             return yield* new InvalidCorrectionPlanError({
@@ -242,7 +271,30 @@ export const ClockinCorrectionsLayer = Layer.effect(
             })
           }
           const span = buildSpan(slice.startUtc, plus(slice.startUtc, newSeconds), slice)
-          const { transactionId } = yield* api.updateEvent(slice.eventId, span)
+          const { transactionId } = yield* api.updateEvent(eventId, span)
+          return yield* finish([transactionId])
+        }),
+
+      editSegment: ({ sliceId, startedAt, endedAt }) =>
+        Effect.gen(function* () {
+          if (startedAt == null && endedAt == null) {
+            return yield* new InvalidCorrectionPlanError({
+              reason: "give a new start, a new end, or both",
+            })
+          }
+          const { slice, eventId } = yield* locate(sliceId)
+          // Ripple "none": set this slice's absolute span, defaulting each side
+          // to its current boundary; no neighbor is moved. The backend rejects a
+          // boundary that overlaps another entry.
+          const start = startedAt ?? slice.startUtc
+          const end = endedAt ?? plus(slice.startUtc, slice.seconds)
+          if (end.getTime() <= start.getTime()) {
+            return yield* new InvalidCorrectionPlanError({
+              reason: "the segment has to end after it starts",
+            })
+          }
+          const span = buildSpan(start, end, slice)
+          const { transactionId } = yield* api.updateEvent(eventId, span)
           return yield* finish([transactionId])
         }),
 

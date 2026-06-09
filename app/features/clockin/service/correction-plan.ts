@@ -1,4 +1,4 @@
-import { Either } from "effect"
+import { Either, Schema } from "effect"
 import { InvalidCorrectionPlanError } from "~/lib/domain/workday"
 import type { CorrectionActivity } from "../api"
 import type { ProjectId } from "~/lib/domain/project"
@@ -54,6 +54,104 @@ export const localParts = (
   // Some engines render midnight as "24"; normalize to "00".
   const hour = v("hour") === "24" ? "00" : v("hour")
   return { date: `${v("year")}-${v("month")}-${v("day")}`, time: `${hour}:${v("minute")}` }
+}
+
+// ---------------------------------------------------------------------------
+// Local wall-clock parsing (the inverse of `localParts`)
+// ---------------------------------------------------------------------------
+// The start/edit tools accept an explicit time. Users and models say "08:40",
+// not "2026-06-08T06:40:00Z" — so we accept a bare `HH:mm` (employee-local,
+// today's date) or a full ISO instant, and resolve both to a UTC `Date`. The
+// HH:mm case is where DST bites: the same wall clock is +1h or +2h off UTC
+// depending on the date, so we read the zone's offset *at that instant* rather
+// than assuming a fixed one.
+
+/** A 24h wall clock, `HH:mm` (00–23 : 00–59). Validated by Effect Schema. */
+export const WallClock = Schema.String.pipe(
+  Schema.pattern(/^([01]\d|2[0-3]):[0-5]\d$/),
+  Schema.brand("WallClock"),
+)
+export type WallClock = typeof WallClock.Type
+
+const isWallClock = Schema.is(WallClock)
+const decodeIso = Schema.decodeUnknownEither(Schema.DateFromString)
+
+/** Offset of `timeZone` at `instant`, in ms (positive = ahead of UTC). */
+const zoneOffsetMs = (instant: Date, timeZone: string): number => {
+  const { date, time } = localParts(instant, timeZone)
+  return Date.parse(`${date}T${time}:00Z`) - instant.getTime()
+}
+
+/**
+ * The UTC instant whose wall clock in `timeZone` is `date` + `time` (local).
+ * Treat the wall time as if it were UTC, then subtract the zone's offset *at
+ * that instant*; one refinement pass settles the self-reference across a DST
+ * boundary. Exact inverse of {@link localParts} for whole-minute inputs.
+ */
+export const wallClockToUtc = (
+  date: string,
+  time: string,
+  timeZone: string = DEFAULT_TIME_ZONE,
+): Date => {
+  const wallAsUtc = Date.parse(`${date}T${time}:00Z`)
+  const once = wallAsUtc - zoneOffsetMs(new Date(wallAsUtc), timeZone)
+  const twice = wallAsUtc - zoneOffsetMs(new Date(once), timeZone)
+  return new Date(twice)
+}
+
+/**
+ * Resolve a user/model time string to a UTC instant. Accepts a bare `HH:mm`
+ * (anchored to `now`'s date in `timeZone`) or a full ISO timestamp. Rides the
+ * typed-error channel like {@link redistribute} so the tool layer can speak the
+ * failure back instead of throwing.
+ */
+export const parseAt = (
+  input: string,
+  now: Date,
+  timeZone: string = DEFAULT_TIME_ZONE,
+): Either.Either<Date, InvalidCorrectionPlanError> => {
+  const trimmed = input.trim()
+  if (isWallClock(trimmed)) {
+    const today = localParts(now, timeZone).date
+    return Either.right(wallClockToUtc(today, trimmed, timeZone))
+  }
+  const iso = decodeIso(trimmed)
+  if (Either.isRight(iso) && !Number.isNaN(iso.right.getTime())) {
+    return Either.right(iso.right)
+  }
+  return Either.left(
+    new InvalidCorrectionPlanError({
+      reason: `couldn't read "${input}" as a time — use HH:mm (e.g. 08:40) or a full ISO timestamp`,
+    }),
+  )
+}
+
+/**
+ * Guard a resolved instant before it's written as a point event. Two ways a
+ * backdated `at` corrupts the timeline:
+ *   • the future — the event hasn't happened yet;
+ *   • before `notBefore` — the latest already-recorded entry. Status reads use a
+ *     strict `>` tie-break, so an event inserted behind the head reorders the
+ *     day. (Point events can't overlap a break *span* — that's edit_segment's
+ *     concern, not this one.)
+ * Times in the message are rendered employee-local for the user to recognize.
+ */
+export const validateAt = (
+  when: Date,
+  now: Date,
+  notBefore?: Date | null,
+  timeZone: string = DEFAULT_TIME_ZONE,
+): Either.Either<Date, InvalidCorrectionPlanError> => {
+  if (when.getTime() > now.getTime()) {
+    return invalid(`that time is in the future — ${localParts(when, timeZone).time} hasn't happened yet`)
+  }
+  if (notBefore != null && when.getTime() < notBefore.getTime()) {
+    return invalid(
+      `${localParts(when, timeZone).time} is before your last entry at ${localParts(notBefore, timeZone).time}` +
+        ` — pick a later time, or fix the earlier entry first`,
+    )
+  }
+  return Either.right(when)
 }
 
 /** A correction reason stamped on every activity we write. */

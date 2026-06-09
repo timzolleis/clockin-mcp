@@ -6,6 +6,7 @@ import {
   FolderKanban,
   ListChecks,
   LogOut,
+  MoveHorizontal,
   Pencil,
   Play,
   Plus,
@@ -32,6 +33,7 @@ export type ToolTag =
   | "time_overview"
   | "restructure_workday"
   | "adjust_slice"
+  | "edit_segment"
   | "append_slice"
 
 export interface Tool {
@@ -79,8 +81,8 @@ export const TOOLS: Tool[] = [
   {
     tag: "list_workdays",
     Icon: CalendarDays,
-    blurb: "Recent days rolled up with per-segment durations and totals.",
-    args: "",
+    blurb: "Workdays rolled up with per-segment durations and totals — recent days or a specific date.",
+    args: "date?",
   },
   {
     tag: "time_overview",
@@ -99,6 +101,12 @@ export const TOOLS: Tool[] = [
     Icon: Pencil,
     blurb: "Resize one time slice — set it or grow it; the day ripples to match.",
     args: "slice_id, op",
+  },
+  {
+    tag: "edit_segment",
+    Icon: MoveHorizontal,
+    blurb: "Move a segment's exact start and/or end — the only way to backdate a start.",
+    args: "segment_id, started_at?",
   },
   {
     tag: "append_slice",
@@ -275,6 +283,16 @@ export const EXAMPLES: Record<ToolTag, Example> = {
       tone: "good",
       title: "Slice updated",
       detail: 'Acme is now <b class="text-ink">1h</b>; clock-out moved earlier.',
+    },
+  },
+  edit_segment: {
+    prompt: "I actually started at 08:40, not 08:58.",
+    reply: "Moved your workday's start back to 08:40.",
+    card: {
+      kind: "confirm",
+      tone: "good",
+      title: "Segment updated",
+      detail: 'Start now <b class="text-ink">08:40</b>; the rest of your day is untouched.',
     },
   },
   append_slice: {

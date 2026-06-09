@@ -16,6 +16,8 @@ export class WorkdaySegment extends Schema.Class<WorkdaySegment>(
   startedAt: Schema.String,
   endedAt: Schema.NullOr(Schema.String),
   durationSeconds: Schema.Number,
+  // `formatDuration(durationSeconds)` — speak-ready, no math needed.
+  duration: Schema.String,
   ongoing: Schema.Boolean,
 }) {}
 
@@ -23,6 +25,8 @@ export class ProjectTotal extends Schema.Class<ProjectTotal>("ProjectTotal")({
   projectId: Schema.Number,
   projectName: Schema.String,
   seconds: Schema.Number,
+  // `formatDuration(seconds)`.
+  duration: Schema.String,
 }) {}
 
 export class WorkdayTotals extends Schema.Class<WorkdayTotals>(
@@ -31,6 +35,10 @@ export class WorkdayTotals extends Schema.Class<WorkdayTotals>(
   clockedInSeconds: Schema.Number,
   workSeconds: Schema.Number,
   breakSeconds: Schema.Number,
+  // Formatted siblings of the `*Seconds` above — agent can echo these directly.
+  clockedIn: Schema.String,
+  worked: Schema.String,
+  onBreak: Schema.String,
   perProject: Schema.Array(ProjectTotal),
 }) {}
 

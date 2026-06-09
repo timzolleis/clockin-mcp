@@ -13,3 +13,6 @@
 
 # SQLite data
 /data/
+
+# Reverse-engineered Clockin app source (extracted from installed app source maps)
+/clockin-app-source/
