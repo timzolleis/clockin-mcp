@@ -85,6 +85,22 @@ describe("parseAt", () => {
     )
   })
 
+  it("anchors a bare HH:mm to anchorDate when given, not today", () => {
+    // append_slice backfilling a past, empty workday: 08:40 lands on 2026-05-28,
+    // not `now`'s 2026-05-30.
+    assert.strictEqual(
+      right(parseAt("08:40", now, "Europe/Berlin", "2026-05-28")).toISOString(),
+      "2026-05-28T06:40:00.000Z",
+    )
+  })
+
+  it("ignores anchorDate for a full ISO instant", () => {
+    assert.strictEqual(
+      right(parseAt("2026-05-30T06:40:00Z", now, "Europe/Berlin", "2026-05-28")).toISOString(),
+      "2026-05-30T06:40:00.000Z",
+    )
+  })
+
   it("passes a full ISO instant through unchanged", () => {
     assert.strictEqual(
       right(parseAt("2026-05-30T06:40:00Z", now, "Europe/Berlin")).toISOString(),

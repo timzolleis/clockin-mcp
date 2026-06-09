@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Ref } from "effect"
 import {
   ClockinCorrectionsApi,
   ClockinCorrectionsApiLive,
@@ -44,9 +44,13 @@ type WriteError = CorrectionWriteError
 //                   (start and/or end), the only primitive that can move a
 //                   start. Ripple "none": neighbors are untouched, so moving a
 //                   start changes the slice id (re-read after).
-//   • appendSlice → one storeEvent at the day's end.
+//   • appendSlice → one storeEvent. With `startedAt` it anchors the slice
+//                   there (lets you place a slice on any day, incl. an empty
+//                   one); without it the slice appends at the day's end.
 //   • restructureDay → delete the day's events, then storeEvent one span per
 //                   bucket from the day's start (conserves the worked total).
+//                   The wipe isn't atomic upstream, so a mid-way failure rolls
+//                   back: undo the new spans, re-create the original day.
 // All times are rendered employee-local by `buildSpan`.
 
 export interface ClockinCorrectionsService {
@@ -85,8 +89,14 @@ export interface ClockinCorrectionsService {
     CurrentClockinCredentials
   >
 
+  /**
+   * Add a slice of `seconds` length. `startedAt` anchors its start; omit it to
+   * append at the day's end (the day must already have entries — an empty day
+   * has no end to append to, so `startedAt` is required there).
+   */
   readonly appendSlice: (slice: {
     date?: string
+    startedAt?: Date
     taskId: ClockableTaskId
     projectId?: ProjectId | null
     seconds: number
@@ -252,13 +262,38 @@ export const ClockinCorrectionsLayer = Layer.effect(
             return span
           })
 
-          for (const id of derived.eventIds) yield* api.deleteEvent(id)
-          const transactionIds: TransactionId[] = []
-          for (const span of spans) {
-            const { transactionId } = yield* api.storeEvent(span)
-            transactionIds.push(transactionId)
-          }
-          return yield* finish(transactionIds)
+          // Snapshot the original slices as storable spans so a failed wipe can
+          // be undone. The upstream delete-then-store isn't atomic; without this
+          // a store that fails after the deletes land leaves the day empty.
+          const original = derived.slices.map((s) =>
+            buildSpan(s.startUtc, plus(s.startUtc, s.seconds), s),
+          )
+          const stored = yield* Ref.make<TransactionId[]>([])
+
+          const write = Effect.gen(function* () {
+            for (const id of derived.eventIds) yield* api.deleteEvent(id)
+            for (const span of spans) {
+              const { transactionId } = yield* api.storeEvent(span)
+              yield* Ref.update(stored, (ids) => [...ids, transactionId])
+            }
+          })
+
+          // Best-effort rollback: undo the new spans we managed to store, then
+          // re-create the original day (re-storing a survivor just overlaps and
+          // is rejected — ignored), and re-surface the failure.
+          yield* write.pipe(
+            Effect.catchAll((error) =>
+              Effect.gen(function* () {
+                const ids = yield* Ref.get(stored)
+                yield* Effect.forEach(ids, (id) => Effect.ignore(api.undo(id)))
+                yield* Effect.forEach(original, (span) =>
+                  Effect.ignore(api.storeEvent(span)),
+                )
+                return yield* Effect.fail(error)
+              }),
+            ),
+          )
+          return yield* finish(yield* Ref.get(stored))
         }),
 
       editSlice: ({ sliceId, op, seconds }) =>
@@ -298,7 +333,7 @@ export const ClockinCorrectionsLayer = Layer.effect(
           return yield* finish([transactionId])
         }),
 
-      appendSlice: ({ date, taskId, projectId, seconds }) =>
+      appendSlice: ({ date, startedAt, taskId, projectId, seconds }) =>
         Effect.gen(function* () {
           if (taskId === TaskId.PROJECT && projectId == null) {
             return yield* new InvalidCorrectionPlanError({
@@ -312,7 +347,23 @@ export const ClockinCorrectionsLayer = Layer.effect(
           }
           const days = yield* api.workdays()
           const derived = deriveDay(resolveDay(days, date), nowIso())
-          const start = derived.endUtc ?? new Date()
+          // Anchor: an explicit start, else the day's end. An empty day has no
+          // end to append to — ask for a start rather than guessing `now` (which
+          // used to land the slice on today, in the future).
+          const start = startedAt ?? derived.endUtc
+          if (start == null) {
+            return yield* new InvalidCorrectionPlanError({
+              reason:
+                "this day has no entries yet — pass a start time to place the slice (e.g. started_at '09:00')",
+            })
+          }
+          // An explicitly placed slice mustn't run into the future; the
+          // append-at-end path keeps its lenient behavior (start is already past).
+          if (startedAt != null && plus(start, seconds).getTime() > Date.now()) {
+            return yield* new InvalidCorrectionPlanError({
+              reason: "that slice would end in the future — shorten it or pick an earlier start",
+            })
+          }
           const span = buildSpan(start, plus(start, seconds), { taskId, projectId })
           const { transactionId } = yield* api.storeEvent(span)
           return yield* finish([transactionId])

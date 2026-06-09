@@ -101,7 +101,9 @@ export const wallClockToUtc = (
 
 /**
  * Resolve a user/model time string to a UTC instant. Accepts a bare `HH:mm`
- * (anchored to `now`'s date in `timeZone`) or a full ISO timestamp. Rides the
+ * (anchored to `anchorDate` if given, else `now`'s date in `timeZone`) or a full
+ * ISO timestamp. `anchorDate` lets a caller place an `HH:mm` on a day other than
+ * today (e.g. append_slice backfilling a past, empty workday). Rides the
  * typed-error channel like {@link redistribute} so the tool layer can speak the
  * failure back instead of throwing.
  */
@@ -109,11 +111,12 @@ export const parseAt = (
   input: string,
   now: Date,
   timeZone: string = DEFAULT_TIME_ZONE,
+  anchorDate?: string,
 ): Either.Either<Date, InvalidCorrectionPlanError> => {
   const trimmed = input.trim()
   if (isWallClock(trimmed)) {
-    const today = localParts(now, timeZone).date
-    return Either.right(wallClockToUtc(today, trimmed, timeZone))
+    const date = anchorDate ?? localParts(now, timeZone).date
+    return Either.right(wallClockToUtc(date, trimmed, timeZone))
   }
   const iso = decodeIso(trimmed)
   if (Either.isRight(iso) && !Number.isNaN(iso.right.getTime())) {

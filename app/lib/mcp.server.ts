@@ -158,6 +158,18 @@ const parseBoundary = (input: string) =>
     return yield* validateAt(when, now, null, DEFAULT_TIME_ZONE)
   })
 
+/**
+ * Parse append_slice's optional start — `HH:mm` (anchored to `date` if given,
+ * else today) or ISO, not in the future. `date` lets a bare `HH:mm` land on a
+ * past, empty workday rather than today.
+ */
+const parseStart = (input: string, date?: string) =>
+  Effect.gen(function* () {
+    const now = new Date()
+    const when = yield* parseAt(input, now, DEFAULT_TIME_ZONE, date)
+    return yield* validateAt(when, now, null, DEFAULT_TIME_ZONE)
+  })
+
 // ---------------------------------------------------------------------------
 // transformErrors — the single, total error→text boundary
 // ---------------------------------------------------------------------------
@@ -691,13 +703,21 @@ const registerTools = (runtime: ToolRuntime) =>
       "append_slice",
       {
         description:
-          "Add a new slice at the END of a day, extending it — e.g. 'I " +
-          "finished with 35 mins of elternportal'. Fields: { date?, task " +
-          "(default 'project'), project_id (required for 'project'), hours?, " +
-          "minutes? }. Use list_projects for ids. Returns { message, today, " +
-          "transactionIds, display } — speak `message` back.",
+          "Record a slice of a given length. By default it's added at the END of " +
+          "the day, extending it — e.g. 'I finished with 35 mins of elternportal'. " +
+          "Pass `started_at` ('HH:mm' employee timezone, or a full ISO timestamp) to " +
+          "anchor the slice's START instead: this places a [start, start+duration] " +
+          "slice anywhere — and is REQUIRED to add the first slice to an empty day " +
+          "(there's no end to append to). With `date`, a bare 'HH:mm' is on that day. " +
+          "Fields: { date?, started_at?, task (default 'project'), project_id " +
+          "(required for 'project'), hours?, minutes? }. Use list_projects for ids. " +
+          "Returns { message, today, transactionIds, display } — speak `message` back.",
         inputSchema: {
           date: z.string().optional(),
+          started_at: z
+            .string()
+            .describe("Slice start: 'HH:mm' or ISO. Omit to append at the day's end.")
+            .optional(),
           task: z.enum(TASK_NAMES).default("project"),
           project_id: z.number().int().positive().optional(),
           hours: z.number().nonnegative().optional(),
@@ -705,20 +725,25 @@ const registerTools = (runtime: ToolRuntime) =>
         },
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
-      ({ date, task, project_id, hours, minutes }) =>
+      ({ date, started_at, task, project_id, hours, minutes }) =>
         run(
           Effect.gen(function* () {
             const corrections = yield* ClockinCorrections
             const at = new Date().toISOString()
             const seconds = toSeconds(hours, minutes)
+            const startedAt =
+              started_at != null ? yield* parseStart(started_at, date) : undefined
             const result = yield* corrections.appendSlice({
               date,
+              startedAt,
               taskId: TASK_BY_NAME[task],
               projectId: project_id != null ? ProjectId.make(project_id) : null,
               seconds,
             })
             const day = result.day
-            const message = `Added ${formatDuration(seconds)} to the end of your day.`
+            const message = startedAt
+              ? `Added a ${formatDuration(seconds)} slice.`
+              : `Added ${formatDuration(seconds)} to the end of your day.`
             return {
               message,
               today: day,
@@ -730,7 +755,7 @@ const registerTools = (runtime: ToolRuntime) =>
                 detail: day ? `${day.worked} logged today.` : "",
               },
             }
-          }),
+          }).pipe(onInvalid("Couldn't add the slice")),
         ),
     )
   })

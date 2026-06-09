@@ -7,7 +7,7 @@ import {
   CorrectionUpdated,
   type CorrectionActivity,
 } from "../api"
-import { CurrentClockinCredentials } from "../client"
+import { ClockinValidationError, CurrentClockinCredentials } from "../client"
 import { ClockinCorrections, ClockinCorrectionsLayer } from "./clockin-corrections"
 import { ClockinWorkdays } from "./clockin-workdays"
 import { TaskId } from "./clockin-tasks"
@@ -21,21 +21,35 @@ import { SliceId, type Workday } from "~/lib/domain/workday"
 // In-memory ClockinCorrectionsApi — records every span stored/updated/deleted.
 // ---------------------------------------------------------------------------
 
-const makeMemoryApi = (workdays: readonly Workday[]) => {
+const makeMemoryApi = (
+  workdays: readonly Workday[],
+  // Fail the Nth (1-based) storeEvent call to exercise the rollback path.
+  opts: { failStoreOnCall?: number } = {},
+) => {
   const stored: CorrectionActivity[] = []
   const updated: Array<{ id: number; activity: CorrectionActivity }> = []
   const deleted: number[] = []
+  const undone: number[] = []
+  let storeCalls = 0
   const layer = Layer.succeed(
     ClockinCorrectionsApi,
     ClockinCorrectionsApi.of({
       workdays: () => Effect.succeed(workdays),
       storeEvent: (activity) =>
-        Effect.sync(() => {
+        Effect.suspend(() => {
+          storeCalls += 1
+          if (opts.failStoreOnCall === storeCalls) {
+            return Effect.fail(
+              new ClockinValidationError({ message: "storeEvent rejected", cause: null }),
+            )
+          }
           stored.push(activity)
-          return new CorrectionStored({
-            transactionId: TransactionId.make(1000 + stored.length),
-            eventUuid: "uuid",
-          })
+          return Effect.succeed(
+            new CorrectionStored({
+              transactionId: TransactionId.make(1000 + stored.length),
+              eventUuid: "uuid",
+            }),
+          )
         }),
       updateEvent: (id, activity) =>
         Effect.sync(() => {
@@ -47,10 +61,10 @@ const makeMemoryApi = (workdays: readonly Workday[]) => {
           })
         }),
       deleteEvent: (id) => Effect.sync(() => void deleted.push(Number(id))),
-      undo: () => Effect.void,
+      undo: (id) => Effect.sync(() => void undone.push(Number(id))),
     }),
   )
-  return { layer, stored, updated, deleted }
+  return { layer, stored, updated, deleted, undone }
 }
 
 const MemoryWorkdays = Layer.succeed(
@@ -271,6 +285,91 @@ describe("ClockinCorrections", () => {
         // starts at the day's end (14:00Z → 16:00 CEST)
         assert.strictEqual(a.start_time, "16:00")
       }),
+    )
+  })
+
+  it.effect("appendSlice anchors the slice at an explicit startedAt", () => {
+    const mem = makeMemoryApi([DAY_PROJECT])
+    return withService(mem, (c) =>
+      c.appendSlice({
+        startedAt: new Date("2026-06-01T07:00:00Z"),
+        taskId: TaskId.PROJECT,
+        projectId: ProjectId.make(9),
+        seconds: 3600,
+      }),
+    ).pipe(
+      Effect.map(() => {
+        assert.strictEqual(mem.stored.length, 1)
+        const a = mem.stored[0]!
+        // 07:00Z → 09:00 CEST, 1h long, ignores the day's end
+        assert.deepStrictEqual(
+          [a.start_time, a.end_time, spanSeconds(a)],
+          ["09:00", "10:00", 3600],
+        )
+      }),
+    )
+  })
+
+  it.effect("appendSlice places the first slice on an empty day given a start", () => {
+    const empty: Workday = { date: "2026-06-01", events: [] }
+    const mem = makeMemoryApi([empty])
+    return withService(mem, (c) =>
+      c.appendSlice({
+        date: "2026-06-01",
+        startedAt: new Date("2026-06-01T07:00:00Z"),
+        taskId: TaskId.WORK,
+        seconds: 3600,
+      }),
+    ).pipe(
+      Effect.map(() => {
+        assert.strictEqual(mem.stored.length, 1)
+        const a = mem.stored[0]!
+        assert.deepStrictEqual([a.start_date, a.start_time, a.end_time], ["2026-06-01", "09:00", "10:00"])
+      }),
+    )
+  })
+
+  it.effect("appendSlice rejects an empty day with no start time", () => {
+    const empty: Workday = { date: "2026-06-01", events: [] }
+    const mem = makeMemoryApi([empty])
+    return withService(mem, (c) =>
+      c.appendSlice({ date: "2026-06-01", taskId: TaskId.WORK, seconds: 3600 }).pipe(
+        Effect.flip,
+        Effect.map((e) => {
+          assert.strictEqual(e._tag, "InvalidCorrectionPlanError")
+          assert.match((e as { reason: string }).reason, /no entries yet/)
+          assert.strictEqual(mem.stored.length, 0)
+        }),
+      ),
+    )
+  })
+
+  it.effect("restructureDay rolls back the wipe when a store fails", () => {
+    // Fail the 2nd store; the day was already wiped, so the original must be
+    // re-created and the one stored span undone.
+    const mem = makeMemoryApi([DAY_PROJECT], { failStoreOnCall: 2 })
+    return withService(mem, (c) =>
+      c.restructureDay({
+        buckets: [
+          { taskId: TaskId.PROJECT, projectId: ProjectId.make(1), weight: 50 },
+          { taskId: TaskId.PROJECT, projectId: ProjectId.make(2), weight: 50 },
+        ],
+      }).pipe(
+        Effect.flip,
+        Effect.map((e) => {
+          assert.strictEqual(e._tag, "ClockinValidationError")
+          assert.deepStrictEqual(mem.deleted, [1, 2, 3]) // day was wiped
+          assert.deepStrictEqual(mem.undone, [1001]) // the one new span we stored, undone
+          // original WORK 09–11 + PROJECT#7 11–14 re-created (the first store +
+          // the two rollback stores → indices 1000, 1002, 1003)
+          const restored = mem.stored.map((a) => [a.task_id, a.project_id, spanSeconds(a)])
+          assert.deepStrictEqual(restored, [
+            [TaskId.PROJECT, 1, 9000], // the partial new span (later undone)
+            [TaskId.WORK, null, 2 * 3600], // restored original WORK
+            [TaskId.PROJECT, 7, 3 * 3600], // restored original PROJECT#7
+          ])
+        }),
+      ),
     )
   })
 })
