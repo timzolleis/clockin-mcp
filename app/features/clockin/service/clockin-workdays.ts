@@ -2,7 +2,7 @@ import { Context, Effect, Layer } from "effect";
 import type { ClockinUnauthenticatedError } from "../client";
 import type { CurrentClockinCredentials } from "../client";
 import { ClockinProjectsApi, ClockinProjectsApiLive } from "../api";
-import { ClockinWorkdaysApi, ClockinWorkdaysApiLive } from "../api";
+import { ClockinCorrectionsApi, ClockinCorrectionsApiLive } from "../api";
 import type { EventRead } from "~/lib/domain/event";
 import { ProjectRef } from "~/lib/domain/project";
 import {
@@ -13,24 +13,27 @@ import {
   WorkdaySummary,
   WorkdayTotals
 } from "~/lib/domain/workday";
-import type { EmployeeId } from "~/lib/domain/employee";
 import { TaskId, stateOfTask } from "./clockin-tasks";
+import { formatDuration } from "./clockin-summary";
 
 // ---------------------------------------------------------------------------
 // Service interface (define the shape first; implement as a Layer later)
 // ---------------------------------------------------------------------------
-// Per-day, LLM-friendly rollups derived from the raw `/workdays` payload
-// (segments + totals per day). Raw transport lives in ClockinWorkdaysApi.
+// Per-day, LLM-friendly rollups derived from the raw correction-view payload
+// (segments + totals per day). We read `/correction` (the same source the app's
+// "Arbeitszeiten verwalten" screen uses) rather than `/workdays`, so older days
+// are reachable. Raw transport lives in ClockinCorrectionsApi.
 
 export interface ClockinWorkdaysService {
   /**
-   * Per-day rollups (segments + totals) for an employee.
+   * Per-day rollups (segments + totals) for the authenticated employee.
    *
-   * → 401 bad or missing token. When `employeeId` is omitted the upstream falls
-   * back to the token's own employee. Transport/decode failures are defects.
+   * Pass an ISO `date` ("YYYY-MM-DD") to keep only that day; omit it for the
+   * full recent set. → 401 bad or missing token. Transport/decode failures are
+   * defects.
    */
   readonly summaries: (
-    employeeId?: EmployeeId
+    date?: string
   ) => Effect.Effect<ReadonlyArray<WorkdaySummary>, ClockinUnauthenticatedError, CurrentClockinCredentials>;
 }
 
@@ -95,6 +98,7 @@ const buildSummary = (
         startedAt: start,
         endedAt: next?.occured_at ?? null,
         durationSeconds,
+        duration: formatDuration(durationSeconds),
         ongoing
       })
     );
@@ -124,7 +128,8 @@ const buildSummary = (
     ProjectTotal.make({
       projectId: id,
       projectName: v.name,
-      seconds: v.seconds
+      seconds: v.seconds,
+      duration: formatDuration(v.seconds)
     })
   );
 
@@ -138,6 +143,9 @@ const buildSummary = (
       clockedInSeconds,
       workSeconds,
       breakSeconds,
+      clockedIn: formatDuration(clockedInSeconds),
+      worked: formatDuration(workSeconds),
+      onBreak: formatDuration(breakSeconds),
       perProject
     })
   });
@@ -146,20 +154,22 @@ const buildSummary = (
 // ---------------------------------------------------------------------------
 // Live implementation
 // ---------------------------------------------------------------------------
-// Reads raw workdays + projects through the API layer, then derives per-day
-// rollups; project names resolve best-effort (a failed resolve degrades to a
-// `Project {id}` placeholder).
+// Reads correction-view workdays + projects through the API layer, then derives
+// per-day rollups; project names resolve best-effort (a failed resolve degrades
+// to a `Project {id}` placeholder). When `date` is given we filter to that day
+// before deriving — the upstream has no date param, so this is a client slice.
 
 export const ClockinWorkdaysLive = Layer.effect(
   ClockinWorkdays,
   Effect.gen(function* () {
-    const workdaysApi = yield* ClockinWorkdaysApi;
+    const correctionsApi = yield* ClockinCorrectionsApi;
     const projectsApi = yield* ClockinProjectsApi;
 
     return ClockinWorkdays.of({
-      summaries: (employeeId) =>
+      summaries: (date) =>
         Effect.gen(function* () {
-          const days = yield* workdaysApi.list(employeeId);
+          const all = yield* correctionsApi.workdays();
+          const days = date != null ? all.filter((d) => d.date === date) : all;
           const allProjects = yield* projectsApi.list().pipe(Effect.catchAll(() => Effect.succeed([])));
           const projectNames = new Map(allProjects.map((p) => [p.id, p.name] as const));
           const projectName = (id: number) => projectNames.get(id) ?? `Project ${id}`;
@@ -168,4 +178,4 @@ export const ClockinWorkdaysLive = Layer.effect(
         })
     });
   })
-).pipe(Layer.provide([ClockinWorkdaysApiLive, ClockinProjectsApiLive]));
+).pipe(Layer.provide([ClockinCorrectionsApiLive, ClockinProjectsApiLive]));

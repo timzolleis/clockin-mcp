@@ -81,8 +81,8 @@ export const TOOLS: Tool[] = [
   {
     tag: "list_workdays",
     Icon: CalendarDays,
-    blurb: "Recent days rolled up with per-segment durations and totals.",
-    args: "",
+    blurb: "Workdays rolled up with per-segment durations and totals — recent days or a specific date.",
+    args: "date?",
   },
   {
     tag: "time_overview",

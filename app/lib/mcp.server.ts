@@ -492,11 +492,17 @@ const registerTools = (runtime: ToolRuntime) =>
       "list_workdays",
       {
         description:
-          "Recent workdays rolled up per day with durations and totals. Each entry has: date, startedAt/endedAt, ongoing, segments (each with type, project, startedAt/endedAt, durationSeconds), and totals { clockedInSeconds, workSeconds, breakSeconds, perProject }. Sufficient to answer 'how much have I worked today / on project X' without any further math.",
-        inputSchema: {},
+          "Workdays rolled up per day with durations and totals. Each entry has: date, startedAt/endedAt, ongoing, segments (each with type, project, startedAt/endedAt, durationSeconds), and totals { clockedInSeconds, workSeconds, breakSeconds, perProject }. Sufficient to answer 'how much have I worked today / on project X' without any further math. Pass `date` ('YYYY-MM-DD') to get just that day; omit it for the recent set.",
+        inputSchema: {
+          date: z
+            .string()
+            .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected an ISO date 'YYYY-MM-DD'")
+            .optional()
+            .describe("Keep only this day (employee-local 'YYYY-MM-DD'). Omit for recent days."),
+        },
         _meta: { ui: { resourceUri: workdaysWidget.uri } },
       },
-      () => run(Effect.flatMap(ClockinWorkdays, (w) => w.summaries())),
+      ({ date }) => run(Effect.flatMap(ClockinWorkdays, (w) => w.summaries(date))),
     )
 
     registerAppTool(
