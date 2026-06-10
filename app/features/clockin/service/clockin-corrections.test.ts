@@ -1,5 +1,5 @@
 import { it } from "@effect/vitest"
-import { Effect, Layer, Redacted } from "effect"
+import { Cause, Effect, Exit, Layer, Redacted } from "effect"
 import { assert, describe } from "vitest"
 import {
   ClockinCorrectionsApi,
@@ -7,7 +7,11 @@ import {
   CorrectionUpdated,
   type CorrectionActivity,
 } from "../api"
-import { ClockinValidationError, CurrentClockinCredentials } from "../client"
+import {
+  ClockinNotFoundError,
+  ClockinValidationError,
+  CurrentClockinCredentials,
+} from "../client"
 import { ClockinCorrections, ClockinCorrectionsLayer } from "./clockin-corrections"
 import { ClockinWorkdays } from "./clockin-workdays"
 import { TaskId } from "./clockin-tasks"
@@ -23,14 +27,21 @@ import { SliceId, type Workday } from "~/lib/domain/workday"
 
 const makeMemoryApi = (
   workdays: readonly Workday[],
-  // Fail the Nth (1-based) storeEvent call to exercise the rollback path.
-  opts: { failStoreOnCall?: number } = {},
+  // Fail the Nth (1-based) call to exercise the failure paths: storeEvent with
+  // a typed error, deleteEvent with a 404 (cascade) or a defect (undocumented
+  // status / transport failure).
+  opts: {
+    failStoreOnCall?: number
+    notFoundDeleteOnCall?: number
+    dieDeleteOnCall?: number
+  } = {},
 ) => {
   const stored: CorrectionActivity[] = []
   const updated: Array<{ id: number; activity: CorrectionActivity }> = []
   const deleted: number[] = []
   const undone: number[] = []
   let storeCalls = 0
+  let deleteCalls = 0
   const layer = Layer.succeed(
     ClockinCorrectionsApi,
     ClockinCorrectionsApi.of({
@@ -60,7 +71,23 @@ const makeMemoryApi = (
             lastInstanceToRefresh: null,
           })
         }),
-      deleteEvent: (id) => Effect.sync(() => void deleted.push(Number(id))),
+      deleteEvent: (id) =>
+        Effect.suspend(() => {
+          deleteCalls += 1
+          if (opts.notFoundDeleteOnCall === deleteCalls) {
+            return Effect.fail(
+              new ClockinNotFoundError({
+                message: `No query results for model [Modules\\Time\\Models\\Event] ${id}`,
+                cause: null,
+              }),
+            )
+          }
+          if (opts.dieDeleteOnCall === deleteCalls) {
+            return Effect.die(new Error("upstream 500 mid-wipe"))
+          }
+          deleted.push(Number(id))
+          return Effect.void
+        }),
       undo: (id) => Effect.sync(() => void undone.push(Number(id))),
     }),
   )
@@ -370,6 +397,59 @@ describe("ClockinCorrections", () => {
           ])
         }),
       ),
+    )
+  })
+
+  it.effect("restructureDay treats a 404 mid-wipe as already deleted and completes", () => {
+    // Deleting an event cascades to its boundary events upstream, so a later
+    // id in the wipe loop can 404. The restructure must finish, not abort.
+    const mem = makeMemoryApi([DAY_WITH_BREAK], { notFoundDeleteOnCall: 4 })
+    return withService(mem, (c) =>
+      c.restructureDay({
+        buckets: [
+          { taskId: TaskId.PROJECT, projectId: ProjectId.make(1), weight: 50 },
+          { taskId: TaskId.PROJECT, projectId: ProjectId.make(2), weight: 50 },
+        ],
+      }),
+    ).pipe(
+      Effect.map(() => {
+        assert.deepStrictEqual(mem.deleted, [1, 2, 3]) // 4 was already gone
+        assert.deepStrictEqual(
+          mem.stored.map((a) => [a.task_id, a.project_id, spanSeconds(a)]),
+          [
+            [TaskId.PROJECT, 1, 9000],
+            [TaskId.PROJECT, 2, 9000],
+          ],
+        )
+        assert.deepStrictEqual(mem.undone, []) // no rollback
+      }),
+    )
+  })
+
+  it.effect("restructureDay rolls back the wipe when a delete dies (defect)", () => {
+    // An undocumented status (e.g. a 500) dies as a defect rather than failing
+    // with a typed error. The rollback must still fire — otherwise the day is
+    // left half-deleted — and the defect must re-surface.
+    const mem = makeMemoryApi([DAY_PROJECT], { dieDeleteOnCall: 2 })
+    return withService(mem, (c) =>
+      c.restructureDay({
+        buckets: [{ taskId: TaskId.PROJECT, projectId: ProjectId.make(1), weight: 100 }],
+      }),
+    ).pipe(
+      Effect.exit,
+      Effect.map((exit) => {
+        assert.isTrue(Exit.isFailure(exit) && Cause.isDie(exit.cause)) // defect re-surfaced
+        assert.deepStrictEqual(mem.deleted, [1]) // wipe aborted after the first delete
+        assert.deepStrictEqual(mem.undone, []) // nothing new was stored yet
+        // original WORK 09–11 + PROJECT#7 11–14 re-created by the rollback
+        assert.deepStrictEqual(
+          mem.stored.map((a) => [a.task_id, a.project_id, spanSeconds(a)]),
+          [
+            [TaskId.WORK, null, 2 * 3600],
+            [TaskId.PROJECT, 7, 3 * 3600],
+          ],
+        )
+      }),
     )
   })
 })

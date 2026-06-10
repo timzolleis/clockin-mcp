@@ -49,8 +49,11 @@ type WriteError = CorrectionWriteError
 //                   one); without it the slice appends at the day's end.
 //   • restructureDay → delete the day's events, then storeEvent one span per
 //                   bucket from the day's start (conserves the worked total).
-//                   The wipe isn't atomic upstream, so a mid-way failure rolls
-//                   back: undo the new spans, re-create the original day.
+//                   A 404 mid-wipe means the event is already gone (upstream
+//                   cascades boundary events) and counts as deleted. The wipe
+//                   isn't atomic upstream, so any other mid-way failure —
+//                   typed or defect — rolls back: undo the new spans,
+//                   re-create the original day.
 // All times are rendered employee-local by `buildSpan`.
 
 export interface ClockinCorrectionsService {
@@ -271,7 +274,14 @@ export const ClockinCorrectionsLayer = Layer.effect(
           const stored = yield* Ref.make<TransactionId[]>([])
 
           const write = Effect.gen(function* () {
-            for (const id of derived.eventIds) yield* api.deleteEvent(id)
+            // A 404 here means the event is already gone — deleting one event
+            // can cascade to its materialized boundary events upstream, so a
+            // later id in this loop may vanish mid-wipe. Gone is the goal.
+            for (const id of derived.eventIds) {
+              yield* api.deleteEvent(id).pipe(
+                Effect.catchTag("ClockinNotFoundError", () => Effect.void),
+              )
+            }
             for (const span of spans) {
               const { transactionId } = yield* api.storeEvent(span)
               yield* Ref.update(stored, (ids) => [...ids, transactionId])
@@ -280,16 +290,19 @@ export const ClockinCorrectionsLayer = Layer.effect(
 
           // Best-effort rollback: undo the new spans we managed to store, then
           // re-create the original day (re-storing a survivor just overlaps and
-          // is rejected — ignored), and re-surface the failure.
+          // is rejected — ignored), and re-surface the failure. Catch the full
+          // CAUSE, not just typed errors — an undocumented status or transport
+          // failure dies as a defect, and a defect mid-wipe must still roll
+          // back or the day is left half-deleted.
           yield* write.pipe(
-            Effect.catchAll((error) =>
+            Effect.catchAllCause((cause) =>
               Effect.gen(function* () {
                 const ids = yield* Ref.get(stored)
                 yield* Effect.forEach(ids, (id) => Effect.ignore(api.undo(id)))
                 yield* Effect.forEach(original, (span) =>
                   Effect.ignore(api.storeEvent(span)),
                 )
-                return yield* Effect.fail(error)
+                return yield* Effect.failCause(cause)
               }),
             ),
           )

@@ -1,6 +1,10 @@
 import { HttpBody, HttpClientResponse } from "@effect/platform";
 import { Context, Effect, Layer, Schema } from "effect";
-import type { ClockinUnauthenticatedError, ClockinValidationError } from "../client";
+import type {
+  ClockinNotFoundError,
+  ClockinUnauthenticatedError,
+  ClockinValidationError
+} from "../client";
 import { CurrentClockinCredentials, UserClockinClient, onlyClockinErrors } from "../client";
 import { Envelope } from "~/lib/domain/shared";
 import { WorkdayArrayResponse, type Workday } from "~/lib/domain/workday";
@@ -87,11 +91,18 @@ export interface ClockinCorrectionsApiService {
 
   /**
    * Remove an event.
-   * `DELETE /correction/deleteEvent/{eventId}`, user_token, 401/422.
+   * `DELETE /correction/deleteEvent/{eventId}`, user_token, 401/404/422.
+   * 404 when the event no longer exists — reachable in normal operation:
+   * deleting one event can cascade to its materialized boundary events
+   * upstream, so an id read moments earlier may already be gone.
    */
   readonly deleteEvent: (
     eventId: EventId
-  ) => Effect.Effect<void, CorrectionWriteError, CurrentClockinCredentials>;
+  ) => Effect.Effect<
+    void,
+    CorrectionWriteError | ClockinNotFoundError,
+    CurrentClockinCredentials
+  >;
 
   /**
    * Undo a previous correction transaction.
@@ -149,7 +160,11 @@ export const ClockinCorrectionsApiLive = Layer.effect(
         user.del(`/correction/deleteEvent/${eventId}`).pipe(
           Effect.asVoid,
           Effect.scoped,
-          onlyClockinErrors("ClockinUnauthenticatedError", "ClockinValidationError")
+          onlyClockinErrors(
+            "ClockinUnauthenticatedError",
+            "ClockinNotFoundError",
+            "ClockinValidationError"
+          )
         ),
 
       undo: (transactionId) =>
