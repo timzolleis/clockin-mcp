@@ -1,9 +1,17 @@
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server"
-import { McpServer as OriginalMcpServer } from "@modelcontextprotocol/sdk/server/mcp"
+import {
+  type AuthInfo,
+  createMcpHandler,
+  getOAuthProtectedResourceMetadataUrl,
+  McpServer as OriginalMcpServer,
+  type McpHttpHandler,
+  OAuthError,
+  OAuthErrorCode,
+  requireBearerAuth,
+} from "@modelcontextprotocol/server"
 import type { JWTPayload } from "better-auth"
 import { verifyJwsAccessToken } from "better-auth/oauth2"
 import { Cause, Context, Effect, Layer, ManagedRuntime } from "effect"
-import { createMcpHandler } from "mcp-handler"
 import type { AppLoadContext } from "react-router"
 import { z } from "zod"
 import { AuthService } from "~/lib/auth"
@@ -259,7 +267,7 @@ const registerTools = (runtime: ToolRuntime) =>
       {
         description:
           "What am I currently doing? Returns a human-readable description plus structured fields: state ('working' | 'on_break' | 'working_on_project' | 'clocked_out' | ...), since (ISO timestamp), forSeconds, and project ({id,name}) when working on one. Self-contained — no extra lookups needed to answer 'what am I doing right now?'.",
-        inputSchema: {},
+        inputSchema: z.object({}),
         _meta: { ui: { resourceUri: statusWidget.uri } },
       },
       () => run(Effect.flatMap(ClockinStatus, (s) => s.current())),
@@ -271,7 +279,7 @@ const registerTools = (runtime: ToolRuntime) =>
       {
         description:
           "Start the workday — clock in. Pass `at` to backdate (e.g. '08:40'); omit for now. Returns { message, clockedInAt (ISO), today, display }. `message` is a ready confirmation; `today` carries the day's totals so far. Speak `message` back to the user.",
-        inputSchema: { at: AT_INPUT },
+        inputSchema: z.object({ at: AT_INPUT }),
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
       ({ at: atInput }) =>
@@ -306,7 +314,7 @@ const registerTools = (runtime: ToolRuntime) =>
       {
         description:
           "End the workday — clock out. Pass `at` to backdate (e.g. '17:30'); omit for now. Returns { message, clockedOutAt (ISO), today: { worked, workedSeconds, onBreak, clockedIn, projects[], projectCount }, display }. `message` already reads e.g. 'Clocked out — 7h 48m logged today across 2 projects.' — speak it back.",
-        inputSchema: { at: AT_INPUT },
+        inputSchema: z.object({ at: AT_INPUT }),
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
       ({ at: atInput }) =>
@@ -342,7 +350,7 @@ const registerTools = (runtime: ToolRuntime) =>
       {
         description:
           "Begin a break. Time stops counting as work. Pass `at` to backdate (e.g. '12:00'); omit for now. Returns { message, breakStartedAt (ISO), today, display }. Speak `message` back.",
-        inputSchema: { at: AT_INPUT },
+        inputSchema: z.object({ at: AT_INPUT }),
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
       ({ at: atInput }) =>
@@ -377,7 +385,7 @@ const registerTools = (runtime: ToolRuntime) =>
       {
         description:
           "Return from a break (or any non-work task) to general work time. Pass `at` to backdate (e.g. '12:30'); omit for now. Returns { message, resumedAt (ISO), away: { duration, seconds, since } | null, today, display }. When you were on a break, `message` reads e.g. 'Back to work — you were away for 42m.' — speak it back.",
-        inputSchema: { at: AT_INPUT },
+        inputSchema: z.object({ at: AT_INPUT }),
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
       ({ at: atInput }) =>
@@ -430,11 +438,11 @@ const registerTools = (runtime: ToolRuntime) =>
           "find the project_id. Pass `at` to backdate the start (e.g. '08:40'); " +
           "omit for now. Returns { message, project: { id, name }, " +
           "startedAt (ISO), today, display } — speak `message` back.",
-        inputSchema: {
+        inputSchema: z.object({
           project_id: z.number().int().positive(),
           project_date_id: z.number().int().positive().optional(),
           at: AT_INPUT,
-        },
+        }),
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
       ({ project_id, project_date_id, at: atInput }) =>
@@ -488,7 +496,7 @@ const registerTools = (runtime: ToolRuntime) =>
       {
         description:
           "List projects. Optionally filter by a substring query. Returns an array of { id, name }.",
-        inputSchema: { query: z.string().optional() },
+        inputSchema: z.object({ query: z.string().optional() }),
         _meta: { ui: { resourceUri: projectsWidget.uri } },
       },
       ({ query }) =>
@@ -505,13 +513,13 @@ const registerTools = (runtime: ToolRuntime) =>
       {
         description:
           "Workdays rolled up per day with durations and totals. Each entry has: date, startedAt/endedAt, ongoing, segments (each with type, project, startedAt/endedAt, durationSeconds), and totals { clockedInSeconds, workSeconds, breakSeconds, perProject }. Sufficient to answer 'how much have I worked today / on project X' without any further math. Pass `date` ('YYYY-MM-DD') to get just that day; omit it for the recent set.",
-        inputSchema: {
+        inputSchema: z.object({
           date: z
             .string()
             .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected an ISO date 'YYYY-MM-DD'")
             .optional()
             .describe("Keep only this day (employee-local 'YYYY-MM-DD'). Omit for recent days."),
-        },
+        }),
         _meta: { ui: { resourceUri: workdaysWidget.uri } },
       },
       ({ date }) => run(Effect.flatMap(ClockinWorkdays, (w) => w.summaries(date))),
@@ -523,7 +531,7 @@ const registerTools = (runtime: ToolRuntime) =>
       {
         description:
           "One-call time balance overview: { currentWeek: { weekStarting, workedHours, targetHours, remainingHours }, currentMonth: { workedHours, targetHours, remainingHours, overtimeHours }, annualFlextimeHours, used/planned/max vacation days }. Hours are decimals (e.g. 7.5 = 7h30m). Sufficient to answer 'how much have I worked this week / month, how much do I still need, what's my flextime / vacation'.",
-        inputSchema: {},
+        inputSchema: z.object({}),
         _meta: { ui: { resourceUri: timeOverviewWidget.uri } },
       },
       () => run(Effect.flatMap(ClockinTimesheets, (t) => t.overview())),
@@ -541,7 +549,7 @@ const registerTools = (runtime: ToolRuntime) =>
           "(default 'project'), project_id (required for 'project'), percent }. " +
           "Use list_projects for ids. Returns { message, today, transactionIds, " +
           "display } — speak `message` back.",
-        inputSchema: {
+        inputSchema: z.object({
           date: z.string().optional(),
           buckets: z
             .array(
@@ -552,7 +560,7 @@ const registerTools = (runtime: ToolRuntime) =>
               }),
             )
             .min(1),
-        },
+        }),
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
       ({ date, buckets }) =>
@@ -600,12 +608,12 @@ const registerTools = (runtime: ToolRuntime) =>
           "slice's start — to backdate a start, set the time when you clock in/start " +
           "the project via their `at` parameter. Pass `hours` and/or `minutes`. " +
           "Returns { message, today, transactionIds, display } — speak `message` back.",
-        inputSchema: {
+        inputSchema: z.object({
           slice_id: z.string(),
           op: z.enum(["set", "add"]).default("set"),
           hours: z.number().nonnegative().optional(),
           minutes: z.number().nonnegative().optional(),
-        },
+        }),
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
       ({ slice_id, op, hours, minutes }) =>
@@ -653,7 +661,7 @@ const registerTools = (runtime: ToolRuntime) =>
           "NOT shifted; the backend rejects a boundary that overlaps another entry. " +
           "Moving a start changes the segment's id, so re-read list_workdays after. " +
           "Returns { message, today, transactionIds, display } — speak `message` back.",
-        inputSchema: {
+        inputSchema: z.object({
           segment_id: z.string().describe("The segment's id, from list_workdays."),
           started_at: z
             .string()
@@ -663,7 +671,7 @@ const registerTools = (runtime: ToolRuntime) =>
             .string()
             .describe("New end: 'HH:mm' or ISO. Omit to keep the current end.")
             .optional(),
-        },
+        }),
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
       ({ segment_id, started_at, ended_at }) =>
@@ -712,7 +720,7 @@ const registerTools = (runtime: ToolRuntime) =>
           "Fields: { date?, started_at?, task (default 'project'), project_id " +
           "(required for 'project'), hours?, minutes? }. Use list_projects for ids. " +
           "Returns { message, today, transactionIds, display } — speak `message` back.",
-        inputSchema: {
+        inputSchema: z.object({
           date: z.string().optional(),
           started_at: z
             .string()
@@ -722,7 +730,7 @@ const registerTools = (runtime: ToolRuntime) =>
           project_id: z.number().int().positive().optional(),
           hours: z.number().nonnegative().optional(),
           minutes: z.number().nonnegative().optional(),
-        },
+        }),
         _meta: { ui: { resourceUri: confirmWidget.uri } },
       },
       ({ date, started_at, task, project_id, hours, minutes }) =>
@@ -783,6 +791,8 @@ const runtimeFor = (env: Env): ToolRuntime => {
 
 const handlerCache = new WeakMap<Env, (request: Request) => Promise<Response>>()
 
+const SERVER_INFO = { name: "clockin-mcp", version: "0.1.0" }
+
 export const getMcpHandler = (
   context: AppLoadContext,
 ): ((request: Request) => Promise<Response>) => {
@@ -792,7 +802,7 @@ export const getMcpHandler = (
 
   const runtime = runtimeFor(env)
   const baseUrl = env.BETTER_AUTH_URL.replace(/\/+$/, "")
-  const mcpResource = `${baseUrl}/mcp`
+  const mcpResource = new URL(`${baseUrl}/mcp`)
   const authIssuer = `${baseUrl}/api/auth`
 
   // Read the signing keys IN-PROCESS straight from D1 (via the jwt plugin),
@@ -808,56 +818,56 @@ export const getMcpHandler = (
       ),
     )
 
-  // 401 challenge pointing MCP clients at our protected-resource metadata so
-  // they can discover the OAuth server and (re)authenticate. Mirrors the header
-  // `@better-auth/oauth-provider`'s `mcpHandler` produced.
-  const resourceUrl = new URL(mcpResource)
-  const challenge =
-    `Bearer resource_metadata="${resourceUrl.origin}` +
-    `/.well-known/oauth-protected-resource${resourceUrl.pathname}"`
-  const unauthorized = (message: string) =>
-    new Response(message, {
-      status: 401,
-      headers: { "WWW-Authenticate": challenge },
-    })
+  // Verify the bearer token locally against those keys. Any failure (expired,
+  // invalid, wrong issuer or audience) is an `invalid_token`, which the gate
+  // turns into a 401 whose `WWW-Authenticate` challenge points MCP clients at
+  // our protected-resource metadata so they (re)run the OAuth flow. The
+  // verified JWT rides along in `extra` for the server factory.
+  const authenticate = requireBearerAuth({
+    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(mcpResource),
+    verifier: {
+      verifyAccessToken: async (token): Promise<AuthInfo> => {
+        const jwt = await verifyJwsAccessToken(token, {
+          jwksFetch: jwks,
+          verifyOptions: { issuer: authIssuer, audience: mcpResource.href },
+        }).catch(() => {
+          throw new OAuthError(OAuthErrorCode.InvalidToken, "invalid token")
+        })
+        return {
+          token,
+          clientId: String(jwt.azp ?? jwt.client_id ?? ""),
+          scopes: typeof jwt.scope === "string" ? jwt.scope.split(" ") : [],
+          expiresAt: jwt.exp,
+          resource: mcpResource,
+          extra: { jwt },
+        }
+      },
+    },
+  })
 
-  // Verify the bearer token locally against those keys, then hand off to the
-  // MCP transport. The inner registration is a synchronous effect: it only
-  // reads the two request-scoped tags and wires callbacks (which bridge to the
-  // runtime lazily, per invocation).
-  const dispatch = (req: Request, jwt: JWTPayload) =>
-    createMcpHandler(
-      (server) =>
-        Effect.runSync(
-          registerTools(runtime).pipe(
-            Effect.provideService(McpServer, server),
-            Effect.provideService(McpJwt, jwt),
-          ),
+  // Stateless (2026-07-28) serving: one fresh server per HTTP request, no
+  // sessions. 2025-era clients that still open with `initialize` are served
+  // statelessly from the same factory (the SDK's default `legacy` posture).
+  // Registration is a synchronous effect: it only reads the two request-scoped
+  // tags and wires callbacks (which bridge to the runtime lazily, per call).
+  const mcp: McpHttpHandler = createMcpHandler(
+    ({ authInfo }) => {
+      const server = new OriginalMcpServer(SERVER_INFO)
+      Effect.runSync(
+        registerTools(runtime).pipe(
+          Effect.provideService(McpServer, server),
+          Effect.provideService(McpJwt, authInfo?.extra?.jwt as JWTPayload),
         ),
-      { serverInfo: { name: "clockin-mcp", version: "0.1.0" } },
-      { basePath: "/", verboseLogs: baseUrl.includes("localhost") },
-    )(req)
+      )
+      return server
+    },
+    { onerror: baseUrl.includes("localhost") ? console.error : undefined },
+  )
 
   const handler = async (request: Request): Promise<Response> => {
-    const authorization = request.headers.get("authorization") ?? undefined
-    const token = authorization?.startsWith("Bearer ")
-      ? authorization.slice("Bearer ".length)
-      : authorization
-    if (!token) return unauthorized("missing authorization header")
-
-    let jwt: JWTPayload
-    try {
-      jwt = await verifyJwsAccessToken(token, {
-        jwksFetch: jwks,
-        verifyOptions: { issuer: authIssuer, audience: mcpResource },
-      })
-    } catch {
-      // Expired / invalid / wrong issuer or audience — re-challenge so the
-      // client re-runs the OAuth flow.
-      return unauthorized("invalid token")
-    }
-
-    return dispatch(request, jwt)
+    const authInfo = await authenticate(request)
+    if (authInfo instanceof Response) return authInfo
+    return mcp.fetch(request, { authInfo })
   }
 
   handlerCache.set(env, handler)

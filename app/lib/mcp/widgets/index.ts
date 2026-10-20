@@ -7,7 +7,7 @@ import {
   RESOURCE_MIME_TYPE,
   registerAppResource,
 } from "@modelcontextprotocol/ext-apps/server"
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp"
+import type { McpServer } from "@modelcontextprotocol/server"
 import { confirmWidget } from "./confirm"
 import { projectsWidget } from "./projects"
 import { statusWidget } from "./status"

@@ -48,7 +48,7 @@ MCP client ──OAuth 2.1──▶ clockin-mcp ──user tokens──▶ Clock
 - **[React Router 7](https://reactrouter.com/)** (framework mode) — web UI + routing
 - **[better-auth](https://www.better-auth.com/)** + [`@better-auth/oauth-provider`](https://www.npmjs.com/package/@better-auth/oauth-provider) — OAuth 2.1 provider for MCP (JWT)
 - **[Effect](https://effect.website/)** — the entire upstream client and service layer
-- **[`mcp-handler`](https://www.npmjs.com/package/mcp-handler)** + **[`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk)** — MCP transport
+- **[`@modelcontextprotocol/server`](https://github.com/modelcontextprotocol/typescript-sdk)** (TypeScript SDK v2) — stateless MCP over Streamable HTTP ([2026-07-28 spec](https://modelcontextprotocol.io/specification/2026-07-28))
 - **AES-256-GCM** token-at-rest encryption
 
 ## Self-hosting
@@ -103,8 +103,11 @@ account at `/settings`.
 
 ## Connecting an MCP client
 
-The MCP endpoint is `${BETTER_AUTH_URL}/mcp` (streamable HTTP). A legacy
-`/sse` transport is also mounted. Clients discover OAuth automatically via:
+The MCP endpoint is `${BETTER_AUTH_URL}/mcp`: stateless Streamable HTTP per the
+2026-07-28 spec, with no sessions or `initialize` handshake. Clients on the
+2025-era protocol revisions are served statelessly from the same endpoint. The
+deprecated HTTP+SSE transport (`/sse`, `/message`) is no longer mounted. Clients
+discover OAuth automatically via:
 
 - `/.well-known/oauth-protected-resource/mcp`
 - `/.well-known/oauth-authorization-server/api/auth`
@@ -130,7 +133,7 @@ app/
     home.tsx, sign-in.tsx, sign-up.tsx, consent.tsx
     settings.tsx              connect Clockin · manage connected clients
     api.auth.ts               mounts the better-auth handler
-    api.mcp.ts                MCP endpoint (/mcp, /sse, /message)
+    api.mcp.ts                MCP endpoint (/mcp)
     api.v1.$.ts               internal JSON API used by the SPA
     well-known/               OAuth + OIDC discovery documents
   features/
@@ -162,7 +165,7 @@ a thin wrapper around an Effect from a business service in
 ```ts
 server.registerTool(
   "my_tool",
-  { description: "...", inputSchema: { /* zod */ } },
+  { description: "...", inputSchema: z.object({ /* ... */ }) },
   (args) => run(Effect.flatMap(SomeClockinService, (s) => s.doThing(args))),
 )
 ```

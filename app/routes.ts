@@ -13,11 +13,8 @@ export default [
 
   route("api/auth/*", "routes/api.auth.ts"),
 
-  // MCP transports (mcp-handler reads basePath="/" → /mcp = streamable, /sse = legacy SSE).
-  // Both routes share the same handler module, distinguished by id.
-  route("mcp", "routes/api.mcp.ts", { id: "mcp-streamable" }),
-  route("sse", "routes/api.mcp.ts", { id: "mcp-sse" }),
-  route("message", "routes/api.mcp.ts", { id: "mcp-message" }),
+  // Stateless Streamable HTTP (MCP 2026-07-28; 2025-era clients served statelessly too).
+  route("mcp", "routes/api.mcp.ts"),
 
   route("api/v1/*", "routes/api.v1.$.ts"),
   // RFC8414: issuer path inserted *after* /.well-known/oauth-authorization-server
