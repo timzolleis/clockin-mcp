@@ -22,7 +22,7 @@
 export const RESOURCE_DOMAINS = ["https://esm.sh"]
 
 const EXT_APPS_URL =
-  "https://esm.sh/@modelcontextprotocol/ext-apps@1.7.2/app-with-deps"
+  "https://esm.sh/@modelcontextprotocol/ext-apps@2.0.3/app-with-deps"
 
 /** A registered widget: its `ui://` URI, listing metadata, and built HTML. */
 export interface Widget {
